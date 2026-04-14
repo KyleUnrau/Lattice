@@ -1,0 +1,19 @@
+{
+  "name": "accounting-software",
+  "version": "1.0.0",
+  "description": "An accounting software developed by Kyle Unrau.",
+  "license": "ISC",
+  "author": "Kyle R. Unrau",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "undici-types": "^7.18.2",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2"
+  }
+}
