@@ -1,0 +1,15 @@
+{
+  "name": "accounting-software",
+  "version": "1.0.0",
+  "description": "An accounting software by Kyle Unrau",
+  "license": "UNLICENSED",
+  "author": "Kyle R. Unrau",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "node dist/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  }
+}

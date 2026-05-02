@@ -14,7 +14,7 @@ export class Ledger {
         nodes: LedgerNode[] = this.nodes,
         parentOrientation: Orientation = Orientation.Positive
     ): Result<Orientation, Error> {
-        if (node === undefined) return { ok: true, value: Orientation.Positive };
+        if (node === undefined) return { ok: true, value: parentOrientation };
 
         for (const n of nodes) {
             if (n === node) return { ok: true, value: n.orientation * parentOrientation };
