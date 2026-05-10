@@ -1,64 +1,60 @@
+import { clear } from "node:console";
 import type { Position } from "./ledger-kernel/positions.js";
-import { TXO, TXI, Transaction } from "./ledger-kernel/transactions.js";
+import {  TXO, TXI, Transaction } from "./ledger-kernel/transactions.js";
 import { runCLI } from "./utils.js";
+import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
+import { AccountTransactionEngine } from "./ledger-kernel/accounts.js";
 
-const cad: Position = {name: "Canadian Dollars"};
-const usd: Position = {name: "United States Dollars"};
+const cad: Position = { name: "Canadian Dollars" };
+const usd: Position = { name: "United States Dollars" };
 
-const output = new TXO(1000, cad);
-const input = new TXI(1000, cad);
+const openingBalance: AccountTransactionEngine = new AccountTransactionEngine(cad, fifo<TXO>, fifo<TXI>);
+const cadCash: AccountTransactionEngine = new AccountTransactionEngine(cad, fifo<TXO>, fifo<TXI>);
+const exchangeExpense: AccountTransactionEngine = new AccountTransactionEngine(cad, fifo<TXO>, fifo<TXI>);
+const transfersToUSD: AccountTransactionEngine = new AccountTransactionEngine(cad, fifo<TXO>, fifo<TXI>);
 
-const transaction: Transaction = new Transaction(
-    [input],
-    [output]
-);
+const transfersFromCAD: AccountTransactionEngine = new AccountTransactionEngine(usd, fifo<TXO>, fifo<TXI>);
+const usdCash: AccountTransactionEngine = new AccountTransactionEngine(usd, fifo<TXO>, fifo<TXI>);
 
-const consumed = output.consume(525);
+const entry1 = openingBalance.inputStage(1000);
+const entry2 = cadCash.outputStage(1000);
 
-const exchangeExpense = new TXO(25, cad);
-const transferToUsd = new TXO(500, cad);
+const trans1 = new Transaction([entry1], [entry2]);
 
-const newTransaction: Transaction = new Transaction(
-    [consumed],
-    [exchangeExpense, transferToUsd]
-);
+const entry3 = cadCash.inputStage(525);
+const entry4 = exchangeExpense.outputStage(25);
+const entry5 = transfersToUSD.outputStage(500);
 
-const transfersFromCad = new TXI(375, usd);
-Transaction.exchangeLink(transferToUsd, transfersFromCad);
-const usdCash = new TXO(375, usd);
+const entry6 = transfersFromCAD.inputStage(375);
+const entry7 = usdCash.outputStage(375);
 
-const nextTransaction: Transaction = new Transaction(
-    [transfersFromCad],
-    [usdCash]
-);
+const trans2cad = new Transaction([entry3], [entry4, entry5]);
+const trans2usd = new Transaction([entry6], [entry7]);
 
-const usdConsumed = usdCash.consume(6.55);
-
-const consumedTransfersFromCad = transfersFromCad.consume(6.55);
-
-const expenseUsd = new Transaction([usdConsumed], [consumedTransfersFromCad]);
-
-const consumedtransferToUsd = transferToUsd.consume(8.73);
-Transaction.exchangeLink(consumedTransfersFromCad, consumedtransferToUsd);
-
-const gstExpense = new TXO(8.73, cad);
-const gstTransaction = new Transaction([consumedtransferToUsd], [gstExpense]);
+Transaction.exchangeLink(trans2cad.getOutputFromStaged(entry5), trans2usd.getInputFromStaged(entry6));
 
 runCLI({
     cad,
     usd,
-    output,
-    input,
-    transaction,
-    consumed,
-    exchangeExpense,
-    transfersFromCad,
-    newTransaction,
-    nextTransaction,
-    usdConsumed,
-    consumedTransfersFromCad,
-    expenseUsd,
-    consumedtransferToUsd,
-    gstExpense,
-    gstTransaction
+    openingBalance,
+    cadCash,
+    exchangeExpense, 
+    transfersToUSD,
+    transfersFromCAD,
+    usdCash,
+    entry1,
+    entry2,
+    trans1,
+    entry3,
+    entry4,
+    entry5,
+    entry6,
+    entry7,
+    trans2cad,
+    trans2usd,
+    fifo,
+    clear,
+    Transaction,
+    TXO,
+    TXI
 });

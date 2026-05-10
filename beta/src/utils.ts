@@ -19,7 +19,7 @@ export function runCLI(context: Record<string, unknown>): void {
             const values = Object.values(context);
 
             // eslint-disable-next-line no-new-func
-            const fn = new Function(...names, `return (${response});`);
+            const fn = new Function(...names, response);
             const result = fn(...values);
 
             if (result !== undefined) console.log("Returned:", result);

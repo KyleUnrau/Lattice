@@ -1,4 +1,4 @@
-import type { AccountNode, AccountTX } from "./accounts.js";
+import type { AccountNode, Account } from "./accounts.js";
 
 type Transaction = AccountTransaction | ExchangeTransaction;
 export class Kernel {
@@ -42,7 +42,7 @@ class Position {
 }
 
 interface AccountTransactionEntry {
-    account: AccountTX;
+    account: Account;
     delta: number;
 }
 
@@ -56,6 +56,6 @@ class ExchangeTransaction {
     constructor(
         public from: AccountTransaction,
         public to: AccountTransaction,
-        public residual: AccountTX
+        public residual: Account
     ) { }
 }
