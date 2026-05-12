@@ -45,5 +45,5 @@ export function dump(value: any): string {
 }
 
 export function write(value: any): void {
-    fs.writeFileSync("test.txt", Buffer.from(dump(value), "utf8"));
+    fs.writeFileSync("output.txt", Buffer.from(dump(value), "utf8"));
 }
