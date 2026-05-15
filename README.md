@@ -541,4 +541,17 @@ Then interact through the CLI:
 
 # License
 
-Experimental project. No license currently specified.
+This project is currently source-available but not open source.
+
+All rights are reserved unless explicitly granted otherwise.
+You may view, study, and experiment with the code for personal and educational purposes, but you may not:
+
+* redistribute the project
+* sublicense the project
+* use the project commercially
+* create proprietary derivatives for distribution
+* rehost the source publicly without permission
+
+The licensing model may change in the future as the architecture and long-term direction of the project become more clearly defined.
+
+If you are interested in collaboration, research, or licensing opportunities, please contact the project author.
