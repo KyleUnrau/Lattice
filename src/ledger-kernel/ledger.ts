@@ -1,9 +1,9 @@
 import type { Position } from "./positions.js";
-import type { DisposalMethod } from "./disposal-methods/disposals.js";
-import type { StagedGroupedOutput, StagedOutput, StagedTXIConsumption, StagedTXO, TXO } from "./transactions/outputs.js";
-import type { TXI, StagedGroupedInput, StagedTXOConsumption, StagedTXI, StagedInput } from "./transactions/inputs.js";
+import type { Output, StagedGroupedOutput, StagedOutput, StagedTXIConsumption, StagedTXO, TXO } from "./transactions/outputs.js";
+import type { TXI, StagedGroupedInput, StagedTXOConsumption, StagedTXI, StagedInput, Input } from "./transactions/inputs.js";
 import type { Result } from "../utils.js";
 import { Transaction } from "./transactions.js";
+import type { DisposalMethod } from "./disposal-methods/disposals.js";
 
 export enum Orientation {
     Positive = 1,
@@ -22,6 +22,11 @@ export class Ledger {
         const transaction = new Transaction(stagedInputs, stagedOutputs);
         this.transactions.push(transaction);
         return transaction;
+    }
+
+    public exchangePosition(from: Output, to: Input): void {
+        from.exchangedInput = to;
+        to.exchangedOutput = from;
     }
 
     public verify(): Result<undefined, Error> {

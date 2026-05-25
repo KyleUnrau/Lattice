@@ -44,7 +44,7 @@ const entry7 = cash.stageOutput(usd, 375);
 
 const transaction2usd = ledger.newTransaction([entry6], [entry7]);
 
-Transaction.exchangeLink(transaction2cad.getOutputFromStaged(entry5), transaction2usd.getInputFromStaged(entry6));
+ledger.exchangePosition(transaction2cad.getOutputFromStaged(entry5), transaction2usd.getInputFromStaged(entry6));
 
 runCLI({
     cad,

@@ -176,12 +176,4 @@ export class Transaction {
 
         return {ok: true, value: position};
     }
-    
-    public static exchangeLink(
-        from: Output,
-        to: Input
-    ): void {
-        from.exchangedInput = to;
-        to.exchangedOutput = from;
-    }
 }
