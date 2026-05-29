@@ -1,86 +1,59 @@
-import type { AccountTransactionEngine } from "../ledger.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import type { Input, StagedTXOConsumption, TXI, TXOConsumption } from "./inputs.js";
+import { TXOConsumption, type TXI } from "./inputs.js";
 
-export type Output = TXO | TXIConsumption | GroupedOutput;
-export type StagedOutput = StagedTXO | StagedTXIConsumption | StagedGroupedOutput;
-
-export interface StagedTXO {
-    stagedType: "txo";
-    quantity: number;
-    position: Position;
-    accountEngine: AccountTransactionEngine;
-}
+export type Output = TXO | TXIConsumption;
 
 export class TXO {
-    public consumptions: TXOConsumption[] = [];
-    public exchangedInput?: (TXI | TXOConsumption);
+    public readonly type = "txo";
     public quantity: number;
 
     constructor(
         quantity: number,
-        public position: Position,
-        public transaction: Transaction
+        public position: Position
     ) {
         if (quantity < 0) throw new Error("The quantity of a TXO cannot be less than 0");
         this.quantity = quantity;
     }
 
-    public calculateAvailable(): number {
+    public getConsumptions(transactions: Transaction[]): TXOConsumption[] {
+        const consumptions: TXOConsumption[] = [];
+
+        for (const transaction of transactions) {
+            for (const input of transaction.inputs) {
+                if (input instanceof TXOConsumption && input.source === this) consumptions.push(input);
+            }
+        }
+
+        return consumptions;
+    }
+
+    public calculateAvailable(transactions: Transaction[]): number {
         let available: number = this.quantity;
-        for (const consumption of this.consumptions) available -= consumption.quantity;
+        for (const consumption of this.getConsumptions(transactions)) available -= consumption.quantity;
 
         return available;
     }
 
-    public consumeStage(quantity: number): StagedTXOConsumption {
+    public consume(quantity: number, transactions: Transaction[]): TXOConsumption {
         if (quantity < 0) throw new Error(`Attempted to consume a negative number from a TXO`);
 
-        const available: number = this.calculateAvailable();
+        const available: number = this.calculateAvailable(transactions);
         if (quantity > available) throw new Error(`Attempted to consume ${quantity} from a TXO that only has ${available} remaining.`);
 
-        const consumption: StagedTXOConsumption = {stagedType: "txo-consumption", quantity, source: this};
-        return consumption;
+        return new TXOConsumption(quantity, this);
     }
 }
 
-export interface StagedTXIConsumption {
-    stagedType: "txi-consumption";
-    quantity: number;
-    source: TXI;
-}
-
 export class TXIConsumption {
+    public readonly type = "txi-consumption";
     public quantity: number;
 
     constructor(
         quantity: number,
-        public source: TXI,
-        public transaction: Transaction,
-        public exchangedInput?: (TXI | TXOConsumption),
+        public source: TXI
     ) {
         if (quantity < 0) throw new Error("The quantity of a TXO cannot be less than 0");
         this.quantity = quantity;
     }
-}
-
-export interface StagedGroupedOutput {
-    stagedType: "grouped-output";
-    outputs: (StagedTXO | StagedTXIConsumption)[];
-}
-
-export class GroupedOutput {
-    constructor(
-        public transaction: Transaction,
-        public outputs: (TXO | TXIConsumption)[],
-        public exchangedInput?: Input
-    ) {}
-}
-
-// - Output Mapping - //
-export interface OutputMapping {
-    txos: Map<StagedTXO, TXO>;
-    txiConsumptions: Map<StagedTXIConsumption, TXIConsumption>;
-    groupedOutputs: Map<StagedGroupedOutput, GroupedOutput>;
 }

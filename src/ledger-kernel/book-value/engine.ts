@@ -5,14 +5,20 @@ import { TXO, type Output } from "../transactions/outputs.js";
 type BasisComponent = {
     position: Position;
     quantity: number;
-    output: Output | null;
-    previous: BasisComponent | null;
+    originalInput: Input;
+    output: {
+        finalOutput: Output;
+        component: BasisComponent;
+    } | null;
 };
-
+/*
 class BookValueEngine {
     public compute(node: Input | Output): BasisComponent[] {
         if (node instanceof TXO) {
             node.transaction.inputs.txis.forEach((txi: TXI): void => { this.compute(txi); });
         }
     }
+
+    public computeTXO(node: TXO): BasisComponent[] {}
 }
+*/

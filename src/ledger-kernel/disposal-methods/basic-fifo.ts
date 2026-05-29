@@ -1,9 +1,11 @@
 import { TXO } from "../transactions/outputs.js";
 import { TXI } from "../transactions/inputs.js";
+import type { Transaction } from "../transactions.js";
 
 export const fifo = <T extends TXO | TXI>(
     components: T[],
-    quantity: number
+    quantity: number,
+    transactions: Transaction[]
 ): Map<T, number> => {
     if (quantity < 0) throw new Error(`Attempted to invoke FIFO disposal method with a negative quantity`);
 
@@ -11,7 +13,7 @@ export const fifo = <T extends TXO | TXI>(
     let remainingQuantity = quantity;
 
     for (const component of components) {
-        const available = component.calculateAvailable();
+        const available = component.calculateAvailable(transactions);
 
         const consume = Math.min(available, remainingQuantity);
         remainingQuantity -= consume;
