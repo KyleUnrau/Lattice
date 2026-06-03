@@ -15,7 +15,7 @@ export class Exchange {
         this.to = new ExchangedTXI(to.quantity, to.position, this);
     }
 
-    public recapture(quantity: number, transactions: Transaction[]): ReverseExchange {
+    public recapture(quantity: number, transactions: Transaction[]): ExchangeRecapture {
         const toQuantity: number = (this.from.quantity / this.to.quantity) * quantity;
         
         return {
@@ -25,7 +25,7 @@ export class Exchange {
     }
 }
 
-export interface ReverseExchange {
+export interface ExchangeRecapture {
     from: TXIConsumption;
     to: TXOConsumption
 }

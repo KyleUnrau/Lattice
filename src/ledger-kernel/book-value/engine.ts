@@ -6,15 +6,33 @@ import type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.
 
 export type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";
 
+/**
+ * Traverses the transaction graph to compute the cost basis of a given output quantity
+ * back to its origin inputs. Each output is traced through exchanges, residuals, and
+ * TXO consumptions until reaching origin TXIs, producing a tree of {@link BasisPath} nodes.
+ */
 export class BookValueEngine {
     constructor(private readonly transactions: Transaction[]) {}
 
+    /**
+     * Computes the basis paths for `quantity` units of `txo`, tracing backwards through
+     * the transaction graph until every branch reaches an origin input. Returns one
+     * {@link BasisPath} leaf per distinct lineage — exchange paths, residual paths, and origin paths.
+     *
+     * @param txo - The output whose basis is being traced.
+     * @param quantity - Portion of `txo` to trace; must be positive and ≤ `txo.quantity`.
+     */
     public compute(txo: TXO, quantity: number): BasisPath[] {
         if (quantity <= 0) throw new Error(`quantity must be positive, got ${quantity}`);
         if (quantity > txo.quantity) throw new Error(`quantity ${quantity} exceeds txo.quantity ${txo.quantity}`);
         return this.traceTXO(txo, quantity, new Set<TXO>());
     }
 
+    /**
+     * Finds the transaction that produced `txo` and proportionally attributes `quantity`
+     * to each of its inputs by the fraction `quantity / totalOutputQty`, then recurses
+     * via {@link traceInput}.
+     */
     private traceTXO(txo: TXO, quantity: number, visited: Set<TXO> = new Set()): BasisPath[] {
         if (visited.has(txo)) throw new Error(`Cycle detected: TXO encountered twice in traversal path`);
 
@@ -36,6 +54,13 @@ export class BookValueEngine {
         return result;
     }
 
+    /**
+     * Dispatches basis tracing for a single input based on its concrete type:
+     * - {@link TXOConsumption} — recurses into the consumed source TXO
+     * - {@link ExchangedTXI} — emits an {@link ExchangePath} and recurses into the exchange's from-side
+     * - {@link ResidualTXI} — emits a {@link ResidualPath} and recurses into the exchange's from-side
+     * - {@link TXI} — emits an {@link OriginPath}, terminating the branch
+     */
     private traceInput(input: Input, quantity: number, visited: Set<TXO> = new Set()): BasisPath[] {
         if (input instanceof TXOConsumption) {
             return this.traceTXO(input.source, quantity, visited);
@@ -62,6 +87,7 @@ export class BookValueEngine {
         throw new Error(`Unknown input type encountered: ${(input as { type?: unknown }).type}`);
     }
 
+    /** Searches the transaction history for the transaction that produced `txo` by reference equality. */
     private findProducingTransaction(txo: TXO): Transaction | undefined {
         for (const tx of this.transactions) {
             for (const output of tx.outputs) {

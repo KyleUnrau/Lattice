@@ -10,11 +10,7 @@ import { Account, AccountFolder } from "./ledger-kernel/accounts.js";
 import type { Position } from "./ledger-kernel/positions.js";
 import { Exchange } from "./ledger-kernel/transactions/exchange.js";
 import { BookValueEngine } from "./ledger-kernel/book-value/engine.js";
-import {
-    computeRecaptureResolution,
-    consumedTXOsFromInputs,
-    collectRecaptureableNodes
-} from "./ledger-kernel/equity-policy.js";
+import { resolveExpense } from "./ledger-kernel/equity-policy.js";
 
 // Positions
 const btc: Position = { name: "Bitcoin" };
@@ -56,20 +52,8 @@ const trans2 = ledger.newTransaction(trans2input, trans2output);
 
 // ─── Phase #2: 525 CAD total ─────────────────────────────────────────────────
 //   500 CAD → Exchange#1 (CAD→USD)
-//    25 CAD → expense, expressed in BTC via its cost-basis lineage
-//
-// The 25 CAD traces back through exchange0 (BTC→CAD), so its cost basis in BTC is:
-//   25 × (0.01 BTC / 1000 CAD) = 0.00025 BTC
-//
-// Proration invariant for computeRecaptureResolution:
-//   totalActualForRecaptured = totalActualReceived × (totalRecapturedSide / totalConsumed)
-//   residualQuantity         = totalActualForRecaptured − totalCostBasis
-//
-// For an expense, proceeds = cost basis (no gain/loss). Setting:
-//   totalActualReceived = totalCostBasis × (totalConsumed / totalRecapturedSide)
-// ensures totalActualForRecaptured = totalCostBasis and residualQuantity = 0, regardless
-// of what fraction of the 25 CAD was exchange-attributed vs. origin CAD.
-// Any non-attributed CAD portion receives a new Exchange at the same implied rate.
+//    25 CAD → expense; resolveExpense traces each CAD portion back to its origin
+//             position automatically (BTC via exchange0 in this example).
 
 const exchange1 = new Exchange({ quantity: 500, position: cad }, { quantity: 375, position: usd });
 
@@ -77,67 +61,35 @@ const exchange1 = new Exchange({ quantity: 500, position: cad }, { quantity: 375
 const trans3inputExchange = cash.generateInputs(cad, 500, ledger.transactions);
 const trans3inputExpense  = cash.generateInputs(cad, 25,  ledger.transactions);
 
-// Derive the 25 CAD expense cost basis in BTC.
-const expenseTXOs          = consumedTXOsFromInputs(trans3inputExpense);
-const expenseTotalConsumed = expenseTXOs.reduce((s, c) => s + c.quantity, 0);
-const expenseBasis         = expenseTXOs.flatMap(c => engine.compute(c.source, c.quantity));
-const expenseNodes         = collectRecaptureableNodes(expenseBasis, btc);
-const expenseTotalRecaptured = expenseNodes.reduce((s, n) => s + n.toSideQuantity, 0);
-const expenseTotalCostBasis  = expenseNodes.reduce((s, n) => s + n.fromQuantity, 0);
-
-// Scale so that residualQuantity = 0: expense proceeds = cost basis.
-const expenseBtcTotal = expenseTotalRecaptured > 0
-    ? expenseTotalCostBasis * (expenseTotalConsumed / expenseTotalRecaptured)
-    : 0;
-
-const expenseResolution = computeRecaptureResolution(
-    expenseTXOs,
-    btc,
-    expenseBtcTotal,
-    engine,
-    ledger.transactions
-);
-// expenseResolution.recaptures[0]: exchange0.recapture(25)
-//   .from = TXIConsumption(25 CAD, exchange0.to)   — settles 25 CAD of exchange0's obligation
-//   .to   = TXOConsumption(0.00025 BTC, exchange0.from) — reclaims BTC at original locked rate
-// expenseResolution.residualQuantity = 0
-// expenseResolution.newExchangeToSideQuantity = 0 (all 25 CAD is exchange0-attributed in this scenario)
-
-// If the 25 CAD had mixed lineage (e.g., part origin-CAD), the non-attributed portion would
-// require a new Exchange at the same implied rate rather than a recapture.
-const expenseNewExchange = expenseResolution.newExchangeToSideQuantity > 0
-    ? new Exchange(
-        { quantity: expenseResolution.newExchangeToSideQuantity, position: cad },
-        { quantity: expenseResolution.newExchangeFromQuantity, position: btc }
-    )
-    : null;
+const expenseResolution = resolveExpense(trans3inputExpense, engine, ledger.transactions);
 
 // Tx #3 (CAD): consume 500 + 25 = 525 CAD
-//   → exchange1.from (500 CAD)
-//   → recapture.from (TXIConsumption 25 CAD, settles exchange0.to)
-//   → expenseNewExchange.from if any non-attributed CAD portion
+//   → exchange1.from  (500 CAD to Exchange#1)
+//   → recapture.from  (settles each exchange's to-side, one entry per exchange in the lineage)
+//   → direct expense  (origin CAD with no exchange lineage, if any)
 const trans3input  = [...trans3inputExchange, ...trans3inputExpense];
 const trans3output = [
     exchange1.from,
-    expenseResolution.recaptures[0]!.from,
-    ...(expenseNewExchange ? [expenseNewExchange.from] : [])
+    ...expenseResolution.recaptureGroups.flatMap(g => g.recaptures.map(r => r.from)),
+    ...expenseResolution.originAmounts.flatMap(o =>
+        exchangeExpense.generateOutputs(o.position, o.quantity, ledger.transactions))
 ];
 const trans3 = ledger.newTransaction(trans3input, trans3output);
 
-// Tx #4 (BTC): reclaim BTC from exchange0 at original locked rate → BTC expense account
-//   inputs: recapture.to (TXOConsumption 0.00025 BTC) [+ expenseNewExchange.to if mixed]
-//   outputs: exchangeExpense TXO (0.00025 BTC)
-const trans4input  = [
-    expenseResolution.recaptures[0]!.to,
-    ...(expenseNewExchange ? [expenseNewExchange.to] : [])
-];
-const trans4output = exchangeExpense.generateOutputs(btc, expenseBtcTotal, ledger.transactions);
-const trans4 = ledger.newTransaction(trans4input, trans4output);
+// Tx #4…N (one per origin position): reclaim each position from its recapture and expense it.
+const expenseTransactions = expenseResolution.recaptureGroups.map(group =>
+    ledger.newTransaction(
+        group.recaptures.map(r => r.to),
+        exchangeExpense.generateOutputs(group.position, group.totalQuantity, ledger.transactions)
+    )
+);
 
-// Tx #5 (USD): receive 375 USD from Exchange#1
+// Tx #5 (USD): receive 375 USD from Exchange #1
 const trans5input  = [exchange1.to];
 const trans5output = cash.generateOutputs(usd, 375, ledger.transactions);
 const trans5 = ledger.newTransaction(trans5input, trans5output);
+
+// --- Phase #3
 
 // ─── Verify ──────────────────────────────────────────────────────────────────
 const verification = ledger.verify();
@@ -162,12 +114,11 @@ runCLI({
     exchange0,
     exchange1,
     expenseResolution,
-    expenseNewExchange,
+    expenseTransactions,
     trans0,
     trans1,
     trans2,
     trans3,
-    trans4,
     trans5,
     engine,
     fifo,
@@ -184,8 +135,6 @@ runCLI({
     TXOConsumption,
     Exchange,
     BookValueEngine,
-    computeRecaptureResolution,
-    consumedTXOsFromInputs,
-    collectRecaptureableNodes,
+    resolveExpense,
     runCLI
 });
