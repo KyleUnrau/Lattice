@@ -1,4 +1,5 @@
-import type { Exchange, ExchangeRecapture } from "./transactions/exchange.js";
+import { Exchange } from "./transactions/exchange.js";
+import type { ExchangeRecapture } from "./transactions/exchange.js";
 import { TXOConsumption, type Input } from "./transactions/inputs.js";
 import { TXO } from "./transactions/outputs.js";
 import type { Transaction } from "./transactions.js";
@@ -164,20 +165,20 @@ export type ExpenseResolution = {
 };
 
 /**
- * Resolves expense inputs across all exchange lineages without requiring a known
- * target position.
+ * Records an expense across all exchange lineages of the consumed inputs.
  *
  * Traces the top-level basis paths for every consumed TXO. Exchange and residual
- * paths are recaptured at their locked rates and grouped by their origin position.
- * Origin paths (no exchange lineage) are surfaced as direct expense amounts in
- * their own position. Each recapture group drives a separate expense transaction;
- * origin amounts are balanced inside the consuming transaction itself.
+ * paths are recaptured at their locked rates and grouped by origin position, so each
+ * portion of the expense is recognised in the position it was originally derived from.
+ * Origin paths (no exchange lineage) are surfaced as direct expense amounts in their
+ * own position. Each recapture group drives a separate expense transaction; origin
+ * amounts are balanced inside the consuming transaction itself.
  *
- * @param inputs - Expense inputs to resolve, typically drawn from a single account.
+ * @param inputs - Expense inputs to record, typically drawn from a single account.
  * @param engine - Book value engine used to trace basis paths.
  * @param transactions - Full transaction history, required to issue recaptures.
  */
-export function resolveExpense(
+export function expense(
     inputs: Input[],
     engine: BookValueEngine,
     transactions: Transaction[]
@@ -214,4 +215,46 @@ export function resolveExpense(
         recaptureGroups: Array.from(byPosition.values()),
         originAmounts: Array.from(originTotals.entries()).map(([position, quantity]) => ({ position, quantity }))
     };
+}
+
+/**
+ * Records an exchange of inputs into `targetPosition`.
+ *
+ * Traces the basis of consumed inputs to compute `resolution.residualQuantity`
+ * (the capital gain or loss) and `resolution.totalCostBasis` for tax reporting.
+ * Returns `actualExchange` — an Exchange at the real market rate covering the
+ * full consumed quantity — which the caller uses to construct transactions.
+ * The exchange chain is preserved through `actualExchange`, so any subsequent
+ * spend of the target-side proceeds can trace cost basis back through the full
+ * lineage without losing the gain portion to an origin TXI.
+ *
+ * `resolution.residualQuantity` is the capital gain (positive) or loss (negative):
+ * actual proceeds minus the locked-rate cost basis.
+ *
+ * @param inputs - Inputs in the source position being exchanged away.
+ * @param targetPosition - The position being received (e.g. CAD).
+ * @param actualProceeds - Total received in `targetPosition` at the market rate.
+ * @param engine - Book value engine for basis tracing.
+ * @param transactions - Full transaction history for recaptures.
+ */
+export function exchange(
+    inputs: Input[],
+    targetPosition: Position,
+    actualProceeds: number,
+    engine: BookValueEngine,
+    transactions: Transaction[]
+): { resolution: RecaptureResolution; actualExchange: Exchange } {
+    const consumedTXOs = consumedTXOsFromInputs(inputs);
+    const resolution = computeRecaptureResolution(
+        consumedTXOs, targetPosition, actualProceeds, engine, transactions
+    );
+
+    const totalConsumed = consumedTXOs.reduce((sum, c) => sum + c.quantity, 0);
+    const inputPosition = consumedTXOs[0]!.source.position;
+    const actualExchange = new Exchange(
+        { quantity: totalConsumed, position: inputPosition },
+        { quantity: actualProceeds, position: targetPosition }
+    );
+
+    return { resolution, actualExchange };
 }

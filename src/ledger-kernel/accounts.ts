@@ -4,9 +4,9 @@ import type { Position } from "./positions.js";
 import type { Transaction } from "./transactions.js";
 import { TXI, TXOConsumption, type Input } from "./transactions/inputs.js";
 import { TXO, type Output, type TXIConsumption } from "./transactions/outputs.js";
-import { ResidualTXI, ResidualTXO, type Exchange } from "./transactions/exchange.js";
+import { ExchangedTXI, ExchangedTXO, ResidualTXI, ResidualTXO, type Exchange } from "./transactions/exchange.js";
 
-export type AccountNode = Account | AccountFolder;
+export type AccountNode = Account | AccountFolder | ExchangePositionsAccount;
 
 export class Account {
     public readonly engines: Map<Position, AccountEngine> = new Map();
@@ -212,5 +212,73 @@ export class AccountEngine {
         for (const txo of this.txos) rootBalance += txo.calculateAvailable(transactions);
 
         return rootBalance;
+    }
+}
+
+/**
+ * Represents the open exchange positions across all transactions as an equity account.
+ * Its balance mirrors the uncaptured residuals of every ExchangedTXO/ExchangedTXI,
+ * making exchange positions visible inside the equity structure rather than as a fudge
+ * factor in the ledger's root balance check.
+ *
+ * Adding this as a child of the equity folder with the same orientation as regular
+ * equity sub-accounts ensures that `equity.getBalances() === netAssets.getBalances()`
+ * exactly, with no external adjustment needed.
+ */
+export class ExchangePositionsAccount {
+    public name: string;
+    public localOrientation: Orientation;
+    public parent: AccountFolder | null = null;
+
+    constructor(name: string, localOrientation: Orientation) {
+        this.name = name;
+        this.localOrientation = localOrientation;
+    }
+
+    public getRootOrientation(): Orientation {
+        if (this.parent === null) return this.localOrientation;
+        return this.parent.getRootOrientation() * this.localOrientation;
+    }
+
+    public getRootBalance(position: Position, transactions: Transaction[]): number {
+        let balance = 0;
+        for (const tx of transactions) {
+            for (const output of tx.outputs) {
+                if (output instanceof ExchangedTXO && output.position === position)
+                    balance += output.calculateAvailable(transactions);
+            }
+            for (const input of tx.inputs) {
+                if (input instanceof ExchangedTXI && input.position === position)
+                    balance -= input.calculateAvailable(transactions);
+            }
+        }
+        return balance;
+    }
+
+    public getRootBalances(transactions: Transaction[]): Map<Position, number> {
+        const positions = new Set<Position>();
+        for (const tx of transactions) {
+            for (const output of tx.outputs)
+                if (output instanceof ExchangedTXO) positions.add(output.position);
+            for (const input of tx.inputs)
+                if (input instanceof ExchangedTXI) positions.add(input.position);
+        }
+        const result = new Map<Position, number>();
+        for (const position of positions) {
+            const balance = this.getRootBalance(position, transactions);
+            if (balance !== 0) result.set(position, balance);
+        }
+        return result;
+    }
+
+    public getBalance(position: Position, transactions: Transaction[]): number {
+        return this.getRootBalance(position, transactions) * this.getRootOrientation();
+    }
+
+    public getBalances(transactions: Transaction[]): Map<Position, number> {
+        const result = new Map<Position, number>();
+        for (const [position, rootBalance] of this.getRootBalances(transactions))
+            result.set(position, rootBalance * this.getRootOrientation());
+        return result;
     }
 }
