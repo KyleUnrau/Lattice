@@ -2,6 +2,11 @@ import { TXO } from "../transactions/outputs.js";
 import { TXI } from "../transactions/inputs.js";
 import type { Transaction } from "../transactions.js";
 
+/**
+ * First-in-first-out {@link DisposalMethod}. Consumes the oldest available lots first,
+ * iterating through `components` in order until `quantity` is fully satisfied.
+ * Throws if the available total across all components is less than `quantity`.
+ */
 export const fifo = <T extends TXO | TXI>(
     components: T[],
     quantity: number,

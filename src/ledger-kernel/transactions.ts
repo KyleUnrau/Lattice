@@ -3,6 +3,11 @@ import type { Position } from "./positions.js";
 import { TXI, TXOConsumption, type Input } from "./transactions/inputs.js";
 import { TXIConsumption, TXO, type Output } from "./transactions/outputs.js";
 
+/**
+ * An atomic, single-position accounting record. Enforces two structural invariants
+ * at construction time — all inputs and outputs must share the same {@link Position},
+ * and `sum(inputs) === sum(outputs)`. Throws immediately if either is violated.
+ */
 export class Transaction {
     public position: Position;
 
@@ -23,6 +28,12 @@ export class Transaction {
         this.outputs = outputs;
     }
 
+    /**
+     * Validates inputs and outputs before committing them to the transaction.
+     * Checks position homogeneity, balance equality, and that every consumption
+     * references a source with sufficient remaining availability.
+     * Returns the shared {@link Position} on success.
+     */
     public verify(
         inputs: Input[],
         outputs: Output[],
@@ -53,7 +64,7 @@ export class Transaction {
                 if (output instanceof TXIConsumption) {
                     if (output.source.calculateAvailable(transactions) < output.quantity) throw new Error(`Attempted to construct a transaction with a TXI consumption object that appears to have been generated incorrectly and attempted to draw from a TXI with an insufficient available balance`);
                 }
-                
+
                 outputsSum += output.quantity;
                 verifyPosition(output instanceof TXO ? output.position : output.source.position);
             }

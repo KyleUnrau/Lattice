@@ -73,17 +73,15 @@ Union types:
 
 ## Exchange
 
-Cross-position transfers are modeled as `Exchange` objects that lock a rate at creation time.
+Cross-position transfers are modeled as `Exchange` objects that lock a conversion rate at creation time.
+
+The `exchange()` equity-policy function is the primary way to create exchanges during transaction construction. It returns a `forwardExchange: Exchange | null` and a `RecaptureResolution` — see the [Equity Policy](#equity-policy) section. The `Exchange` class can also be instantiated directly when constructing the initial side of a known conversion (e.g. `exchange1` in a CAD→USD swap) before any prior lineage exists.
 
 ```ts
-const exchange0 = new Exchange(
-    { quantity: 0.01, position: btc },  // from: what you give
-    { quantity: 1000, position: cad }   // to: what you receive
-);
+// Exchange kernel primitives (from transactions/exchange.ts)
+exchange.from  // ExchangedTXO — the "from" side; goes in the source transaction's outputs
+exchange.to    // ExchangedTXI — the "to" side; goes in the destination transaction's inputs
 ```
-
-`exchange0.from` is an `ExchangedTXO` (goes into a BTC transaction's outputs — you're giving BTC away).  
-`exchange0.to` is an `ExchangedTXI` (goes into a CAD transaction's inputs — you're receiving CAD).
 
 ### Exchange Transaction Pairs
 
@@ -91,10 +89,10 @@ An exchange always spans two single-position transactions:
 
 ```ts
 // BTC transaction: wallet gives 0.01 BTC to the exchange
-ledger.newTransaction(wallet.generateInputs(btc, 0.01, txs), [exchange0.from]);
+ledger.newTransaction(wallet.generateInputs(btc, 0.01, txs), [swap.forwardExchange.from]);
 
 // CAD transaction: cash receives 1000 CAD from the exchange
-ledger.newTransaction([exchange0.to], cash.generateOutputs(cad, 1000, txs));
+ledger.newTransaction([swap.forwardExchange.to], cash.generateOutputs(cad, 1000, txs));
 ```
 
 ### Recapture
@@ -102,12 +100,12 @@ ledger.newTransaction([exchange0.to], cash.generateOutputs(cad, 1000, txs));
 An exchange can be partially or fully unwound at the original locked rate:
 
 ```ts
-const reversal = exchange0.recapture(25, ledger.transactions);
-// reversal.from: TXIConsumption(25 CAD)  — settles part of exchange0.to
-// reversal.to:   TXOConsumption(0.00025 BTC) — reclaims part of exchange0.from
+const recapture = exchange1.recapture(375, ledger.transactions);
+// recapture.from: TXIConsumption(375 CAD)  — settles part of exchange1.to
+// recapture.to:   TXOConsumption(500 CAD rate-equivalent) — reclaims from exchange1.from
 ```
 
-The recapture rate is always `from.quantity / to.quantity` — the original locked rate regardless of current market.
+The recapture rate is always `from.quantity / to.quantity` — the original locked rate regardless of current market. Recaptures are computed automatically by `computeRecaptureResolution()` and returned via the `resolution.recaptures` array.
 
 ### Exchange Subtypes
 
@@ -126,7 +124,7 @@ The recapture rate is always `from.quantity / to.quantity` — the original lock
 
 ### Account
 
-A single `Account` manages per-position engines containing `TXO` and `TXI` lists. It is the only concrete account type.
+A single `Account` manages per-position engines containing `TXO` and `TXI` lists. It is the only concrete account type that generates transaction inputs and outputs.
 
 ```ts
 const cash = currentAssets.addAccount("Cash", Orientation.Positive, fifo<TXO>, fifo<TXI>);
@@ -137,13 +135,22 @@ Key methods:
 ```ts
 account.generateInputs(position, quantity, transactions)   // consume TXOs → return TXOConsumptions (+ TXI if needed)
 account.generateOutputs(position, quantity, transactions)  // settle TXIs → return TXIConsumptions (+ TXO if needed)
-account.generateResidualInput(position, quantity, exchange)  // ResidualTXI — exchange-tagged gain/income
-account.generateResidualOutput(position, quantity, exchange) // ResidualTXO — exchange-tagged loss/expense
+account.generateResidualInput(position, quantity, exchange)  // ResidualTXI — exchange-tagged gain
+account.generateResidualOutput(position, quantity, exchange) // ResidualTXO — exchange-tagged loss
 ```
 
 `generateInputs` pulls value out of the account (spending) by consuming existing `TXO` lots via the disposal method. If more is requested than available, it creates a fresh `TXI` for the shortfall.
 
 `generateOutputs` delivers value into the account by settling existing `TXI` obligations. If more is delivered than owed, it creates a fresh `TXO` for the surplus.
+
+### ExchangePositionsAccount
+
+`ExchangePositionsAccount` is a read-only computed equity account — it has no `generateInputs()` or `generateOutputs()`. Its balance is derived on demand by scanning every `ExchangedTXO` and `ExchangedTXI` across all transactions:
+
+- Remaining `ExchangedTXO` availability contributes a positive root balance (asset still held at exchange).
+- Remaining `ExchangedTXI` availability contributes a negative root balance (exchange's reciprocal claim).
+
+Adding it to the equity tree ensures that `netAssets.getRootBalances() + equity.getRootBalances() === 0` even with open, partially-recaptured exchanges — each open exchange contributes a matching +/− pair that cancels with the account flows that funded it.
 
 ### AccountFolder
 
@@ -203,7 +210,7 @@ type BasisPath = OriginPath | ExchangePath | ResidualPath;
 
 | Type | Meaning |
 |------|---------|
-| `OriginPath` | Reached a plain `TXI` — opening balance, equity injection, or recognized gain. No further lineage. |
+| `OriginPath` | Reached a plain `TXI` — opening balance, equity injection, or unattributed inflow. No further lineage. |
 | `ExchangePath` | Crossed an `ExchangedTXI` — value came from an exchange. Carries `quantity` (to-side), `fromQuantity` (from-side at locked rate), and recursive `basis` of the from-side. |
 | `ResidualPath` | Crossed a `ResidualTXI` — an exchange-tagged gain with recursive basis. Same shape as `ExchangePath` but tagged `"residual"`. |
 
@@ -224,7 +231,7 @@ type BasisPath = OriginPath | ExchangePath | ResidualPath;
 
 ## Equity Policy
 
-The equity policy answers: *"How should an exchange be settled when I convert back?"* given a set of consumed TXOs and a target position.
+The equity policy (`equity-policy.ts`) answers two questions: *"How should consumed inputs be attributed back to their origin position?"* and *"How should gains and losses be carried without breaking the basis chain?"*
 
 ### collectRecaptureableNodes
 
@@ -232,7 +239,11 @@ The equity policy answers: *"How should an exchange be settled when I convert ba
 collectRecaptureableNodes(basis: BasisPath[], targetPosition: Position): RecaptureableNode[]
 ```
 
-Walks the full `BasisPath` tree recursively. Collects every `ExchangePath` whose `exchange.from.position === targetPosition` (these exchanges can be recaptured). `ResidualPath` nodes whose exchange points to the target are **skipped** — they represent already-recognized gains above the exchange's output and cannot be further recaptured from the exchange. Non-recapturable nodes are recursed into to find deeper recapturable exchanges.
+Walks the full `BasisPath` tree recursively. Collects every `ExchangePath` whose `exchange.from.position === targetPosition` (these exchanges can be recaptured at locked rate). Non-recapturable exchange nodes are recursed into to find deeper recapturable exchanges. Origin paths are ignored.
+
+### groupRecapturesByExchange
+
+Aggregates `RecaptureableNode[]` by exchange instance, summing to-side and from-side quantities across all nodes sharing the same exchange. Ensures each exchange is recaptured exactly once even when its lineage appears in multiple consumed TXOs.
 
 ### computeRecaptureResolution
 
@@ -249,28 +260,77 @@ computeRecaptureResolution(
 Full resolution pipeline:
 1. Compute `BasisPath[]` for every consumed TXO via the engine.
 2. Collect and group recapturable nodes by exchange.
-3. Call `exchange.recapture(toSideQuantity, transactions)` for each → produces `ReverseExchange[]`.
+3. Call `exchange.recapture(toSideQuantity, transactions)` for each → produces `ExchangeRecapture[]`.
 4. Compute `totalActualForRecaptured = totalActualReceived × (totalRecapturedToSide / totalConsumed)`.
 5. Return:
 
 ```ts
 type RecaptureResolution = {
-    recaptures: ReverseExchange[];          // reverse exchange objects to include in transactions
-    totalCostBasis: number;                 // sum of original "from" quantities (at locked rate)
-    residualQuantity: number;               // actualForRecaptured − costBasis (positive=gain, negative=loss)
-    newExchangeToSideQuantity: number;      // consumed quantity not covered by recaptures
-    newExchangeFromQuantity: number;        // target position quantity for the new exchange
+    recaptures: ExchangeRecapture[];   // recapture objects to include in transactions
+    totalCostBasis: number;            // sum of original "from" quantities at locked rate
+    residualQuantity: number;          // actualForRecaptured − costBasis (positive=gain, negative=loss)
+    newExchangeToQuantity: number;     // consumed quantity not covered by any recapture
+    newExchangeFromQuantity: number;   // target-position equivalent for newExchangeToQuantity
 };
 ```
 
-### Handling the Residual
+### expense
 
-`residualQuantity` is signed:
-- **Positive (gain):** `account.generateResidualInput(position, residualQuantity, originExchange)` — creates a `ResidualTXI` that contributes to account income and carries the original exchange's rate for future lineage tracing.
-- **Negative (loss):** `account.generateResidualOutput(position, -residualQuantity, originExchange)` — creates a `ResidualTXO` that contributes to account expense with the same rate tagging.
-- **Zero:** no residual entry needed.
+```ts
+expense(inputs: Input[], engine: BookValueEngine, transactions: Transaction[]): ExpenseResolution
+```
 
-The `originExchange` tag is chosen as the exchange whose rate best represents the lineage of the gain or loss (e.g., the original BTC→CAD exchange when the gain is ultimately denominated in a BTC-derived position).
+Records an expense by tracing the top-level basis paths of all consumed inputs. Exchange and residual paths are recaptured at locked rates and grouped by origin position, so each portion of the expense is recognized in the position it was originally derived from. Origin-path amounts (no exchange lineage) are surfaced as direct expense amounts in their own position.
+
+Returns an `ExpenseResolution` with:
+- `recaptureGroups` — one `ExpenseRecaptureGroup` per distinct origin position; each group drives a separate expense transaction.
+- `originAmounts` — portions with no exchange lineage; expensed directly in the consuming transaction.
+
+### exchange
+
+```ts
+exchange(
+    inputs: Input[],
+    targetPosition: Position,
+    actualProceeds: number,
+    engine: BookValueEngine,
+    transactions: Transaction[]
+): ExchangeResolution
+```
+
+Records an exchange of inputs into `targetPosition`. Traces the basis of consumed inputs to compute cost basis and gain/loss, then decides whether a `forwardExchange` is needed:
+
+**`forwardExchange: Exchange | null`**
+
+- **Non-null** when `|residualQuantity| > ε` (gain or loss present) OR when any consumed quantity has no prior exchange lineage (`newExchangeToQuantity > ε`). The `forwardExchange` spans the full consumed quantity at the actual market rate, carrying the complete basis chain through one consistent exchange node. Its `.from` goes in the consuming transaction's outputs; its `.to` goes in the receiving transaction's inputs, alongside any recapture entries.
+- **Null** (pure recapture) when all consumed quantity traces exactly to prior exchanges that close at their locked rates with zero residual. The existing `resolution.recaptures` alone settle all open positions cleanly.
+
+`resolution.residualQuantity` is always available for tax reporting regardless of whether `forwardExchange` is null.
+
+**Why `forwardExchange` instead of injecting a residual TXI for the gain:**  
+A plain `TXI` (origin path) carries zero cost basis. If a 50 CAD gain were injected as a `TXI` and the 550 CAD were later exchanged for BTC, the 50/550 portion would trace as an unattributed inflow — breaking proportional cost basis for the entire position. With `forwardExchange` covering all 550 CAD at the actual rate, the basis engine traces: 550 CAD → `forwardExchange` → 375 USD → `exchange1` → 500 CAD → `btcExchange` → BTC, preserving the full chain.
+
+### Transaction Construction Pattern
+
+```ts
+const swap = exchange(fromInputs, targetPosition, actualProceeds, engine, ledger.transactions);
+
+// consuming transaction: recaptures settle prior exchanges; forwardExchange.from anchors the new one
+const fromOutputs: Output[] = [
+    ...swap.resolution.recaptures.map(r => r.from),
+    ...(swap.forwardExchange ? [swap.forwardExchange.from] : [])
+];
+ledger.newTransaction(fromInputs, fromOutputs);
+
+// receiving transaction: forwardExchange.to (or recapture.to) → account outputs
+const toInputs: Input[] = [
+    ...swap.resolution.recaptures.map(r => r.to),
+    ...(swap.forwardExchange ? [swap.forwardExchange.to] : [])
+];
+ledger.newTransaction(toInputs, cash.generateOutputs(targetPosition, actualProceeds, ledger.transactions));
+
+// swap.resolution.residualQuantity — gain (positive) or loss (negative) for tax reporting
+```
 
 ---
 
@@ -286,53 +346,53 @@ ledger.verify();                         // returns { ok: true } or { ok: false,
 
 ### Verification
 
-`ledger.verify()` checks that every position's total root balance equals zero (within floating-point epsilon). It sums:
+`ledger.verify()` checks that every position's total root balance — the sum of `netAssets.getRootBalances()` and `equity.getRootBalances()` — equals zero (within floating-point epsilon).
 
-1. All account root balances from the `netAssets` and `equity` trees.
-2. **Open exchange position adjustments:** `ExchangedTXO` remaining availability is added (asset held at exchange); `ExchangedTXI` remaining availability is subtracted (exchange's reciprocal claim). This ensures the ledger balances even with open, unrecaptured exchanges — each open exchange contributes a matching +/− pair that cancels with the account flow that funded it.
+Open exchange positions are handled structurally: `ExchangePositionsAccount` is added to the equity tree with the appropriate orientation. Its `getRootBalance()` scans all transactions for remaining `ExchangedTXO`/`ExchangedTXI` availability and contributes the net to the equity sum. No special adjustment is needed inside `verify()` — the equity account tree already accounts for it.
 
-A fully-settled exchange (both sides consumed to zero) contributes nothing to the adjustment.
+A fully-settled exchange (both sides consumed to zero) contributes nothing to `ExchangePositionsAccount`.
 
 ---
 
 ## Example Flow (main.ts)
 
-The included example demonstrates a six-phase BTC/CAD/USD scenario:
+The included example demonstrates a four-phase BTC/CAD/USD scenario. Each phase is a self-contained function that generates and commits its transactions when called, building on the ledger state left by prior phases.
 
 | Phase | Description |
 |-------|-------------|
-| 1 | Opening balance: 0.02 BTC into wallet |
-| 2 | Exchange#0: 0.01 BTC → 1000 CAD |
-| 3 | 525 CAD → Exchange#1 (500 CAD→375 USD) + partial Exchange#0 recapture fee (25 CAD→0.00025 BTC expense) |
-| 4 | Equity policy: derive 375 USD basis, find Exchange#1 (CAD→USD), recapture 375 USD → cost basis 500 CAD; residual goes to capitalGains (gain or loss tagged to Exchange#0's rate) |
-| 5 | Inject 2000 CAD opening balance |
-| 6 | Equity policy: prorate 2550 CAD — Exchange#0-attributed portion recaptured (BTC back at original rate + BTC gain/loss to capitalGains); remainder creates Exchange#2 (CAD→BTC) |
+| `phase0` | Opening balance: 0.02 BTC credited to wallet |
+| `phase1` | Exchange 0.01 BTC → 1000 CAD; BTC has no prior CAD lineage so `forwardExchange` covers the full amount |
+| `phase2` | 500 CAD exchanged for 375 USD via equity policy (CAD has no prior USD lineage → `forwardExchange`); 25 CAD expensed and traced back to BTC via phase1's exchange chain |
+| `phase3` | 375 USD exchanged for 550 CAD (50 CAD gain); `forwardExchange` at actual rate carries the full 550 CAD basis chain through USD → CAD → BTC |
 
-All six phases pass `ledger.verify()` at the end.
+All phases pass `ledger.verify()` when called in sequence.
 
-### Key Pattern: Exchange Recapture via Equity Policy
+### Phase Functions
 
-Instead of referencing exchange objects directly by name, the equity policy derives which exchanges to recapture from the book value lineage:
+Each phase function follows the same structure:
 
 ```ts
-const resolution = computeRecaptureResolution(
-    consumedTXOsFromInputs(usdInputs),
-    cad,               // target position
-    actualCadReceived, // actual market amount received
-    engine,
-    ledger.transactions
-);
+function phase1(): { from: TransactionConstruct, to: TransactionConstruct, exchange: ExchangeResolution } {
+    const fromInputs = wallet.generateInputs(btc, 0.01, ledger.transactions);
+    const swap = exchange(fromInputs, cad, 1000, engine, ledger.transactions);
 
-// gain: income entry tagged to originating exchange rate
-const gainTXI = resolution.residualQuantity > 0
-    ? capitalGains.generateResidualInput(cad, resolution.residualQuantity, originExchange)
-    : null;
+    // from: consuming transaction (wallet BTC → exchange)
+    const fromOutputs: Output[] = swap.resolution.recaptures.map(r => r.from);
+    if (swap.forwardExchange) fromOutputs.push(swap.forwardExchange.from);
 
-// loss: expense entry tagged to originating exchange rate
-const lossTXO = resolution.residualQuantity < 0
-    ? capitalGains.generateResidualOutput(cad, -resolution.residualQuantity, originExchange)
-    : null;
+    // to: receiving transaction (exchange → cash CAD)
+    const toInputs: Input[] = swap.resolution.recaptures.map(r => r.to);
+    if (swap.forwardExchange) toInputs.push(swap.forwardExchange.to);
+
+    return {
+        from: { inputs: fromInputs, outputs: fromOutputs, transaction: ledger.newTransaction(fromInputs, fromOutputs) },
+        to:   { inputs: toInputs,   outputs: toOutputs,   transaction: ledger.newTransaction(toInputs, cash.generateOutputs(cad, 1000, ledger.transactions)) },
+        exchange: swap
+    };
+}
 ```
+
+The phase functions are available in the REPL context so they can be called interactively to build up ledger state and then inspected.
 
 ---
 
@@ -340,18 +400,18 @@ const lossTXO = resolution.residualQuantity < 0
 
 ```
 src/
-├── main.ts                                    Example scenario and CLI sandbox
-├── utils.ts                                   CLI runner and debugging helpers
+├── main.ts                                    Phase functions and CLI sandbox
+├── utils.ts                                   Result type, CLI runner, debugging helpers
 └── ledger-kernel/
     ├── positions.ts                           Position interface
     ├── transactions.ts                        Transaction construction and validation
     ├── ledger.ts                              Ledger container and verification
-    ├── accounts.ts                            Account, AccountFolder, AccountEngine
-    ├── equity-policy.ts                       collectRecaptureableNodes, computeRecaptureResolution
+    ├── accounts.ts                            Account, AccountFolder, AccountEngine, ExchangePositionsAccount
+    ├── equity-policy.ts                       exchange(), expense(), computeRecaptureResolution()
     ├── transactions/
     │   ├── inputs.ts                          TXI, TXOConsumption
     │   ├── outputs.ts                         TXO, TXIConsumption
-    │   └── exchange.ts                        Exchange, ExchangedTXO/TXI, ResidualTXO/TXI, ReverseExchange
+    │   └── exchange.ts                        Exchange, ExchangedTXO/TXI, ResidualTXO/TXI, ExchangeRecapture
     ├── disposal-methods/
     │   ├── disposals.ts                       DisposalMethod type
     │   └── basic-fifo.ts                      FIFO implementation
@@ -373,13 +433,15 @@ npm start
 The CLI evaluates arbitrary expressions in the context of the running ledger:
 
 ```
+> phase0()
+> phase1()
 > ledger.verify()
 > cash.getBalances(ledger.transactions)
-> dump(engine.compute(cadInOutputs[0], 1000))
+> dump(engine.compute(someTXO, 500))
 > ledger.getRootBalances()
 ```
 
-All named variables from `main.ts` (accounts, exchanges, resolutions, engine, constructors) are available in the REPL context.
+All named variables from `main.ts` (positions, accounts, engine, phase functions, constructors) are available in the REPL context.
 
 ---
 
@@ -392,10 +454,10 @@ All named variables from `main.ts` (accounts, exchanges, resolutions, engine, co
 | TXO availability never over-consumed | `TXO.consume()` checks against `calculateAvailable()` |
 | TXI availability never over-consumed | `TXI.consume()` checks against `calculateAvailable()` |
 | Book value traversal is acyclic | Per-branch visited set in `BookValueEngine` |
-| Ledger nets to zero per position | `Ledger.verify()` including open exchange adjustments |
-| Residual quantity ≥ 0 for TXI/TXO | Callers negate before passing to `generateResidual*` |
+| Ledger nets to zero per position | `Ledger.verify()` including `ExchangePositionsAccount` in equity |
+| ExchangePositionsAccount is read-only | No `generateInputs()`/`generateOutputs()` — positions settle only via `Exchange.recapture()` |
 
-**Policy decisions (not invariants):** which lots to consume (disposal method), when to recognize gain/loss, whether to recapture a given exchange, how residuals are tagged.
+**Policy decisions (not invariants):** which lots to consume (disposal method), when to recognize gain/loss, whether a `forwardExchange` is needed, how residuals are tagged.
 
 ---
 
@@ -413,6 +475,7 @@ It deliberately avoids:
 - Mutable balance tables (all balances are re-derived from transaction history)
 - Hardcoded debit/credit semantics (orientation propagates multiplicatively)
 - Special-case logic for specific asset types
+- Injecting origin TXIs for gains (breaks cost basis chain for subsequent transactions)
 
 ---
 

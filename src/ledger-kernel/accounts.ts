@@ -8,6 +8,13 @@ import { ExchangedTXI, ExchangedTXO, ResidualTXI, ResidualTXO, type Exchange } f
 
 export type AccountNode = Account | AccountFolder | ExchangePositionsAccount;
 
+/**
+ * Manages per-position {@link AccountEngine}s containing TXO and TXI lots. Implements
+ * the double-sided ledger entry point: `generateInputs` pulls value out (spending/disposal)
+ * by consuming existing TXO lots; `generateOutputs` pushes value in (receipt/income) by
+ * settling existing TXI obligations. Both methods use the account's configured
+ * {@link DisposalMethod}s for lot selection.
+ */
 export class Account {
     public readonly engines: Map<Position, AccountEngine> = new Map();
 
@@ -58,12 +65,22 @@ export class Account {
         return this.getEngine(position).generateOutputs(quantity, transactions);
     }
 
+    /**
+     * Creates a {@link ResidualTXI} tagged to `exchange` and registers it in the position engine.
+     * Used to represent a gain above an exchange's locked rate while preserving the exchange
+     * lineage for future basis tracing.
+     */
     public generateResidualInput(position: Position, quantity: number, exchange: Exchange): ResidualTXI {
         const txi = new ResidualTXI(quantity, position, exchange);
         this.getEngine(position).txis.push(txi);
         return txi;
     }
 
+    /**
+     * Creates a {@link ResidualTXO} tagged to `exchange` and registers it in the position engine.
+     * Used to represent a loss below an exchange's locked rate while preserving the exchange
+     * lineage for future basis tracing.
+     */
     public generateResidualOutput(position: Position, quantity: number, exchange: Exchange): ResidualTXO {
         const txo = new ResidualTXO(quantity, position, exchange);
         this.getEngine(position).txos.push(txo);
@@ -71,6 +88,11 @@ export class Account {
     }
 }
 
+/**
+ * A named node in the account tree that groups {@link Account}s and sub-folders.
+ * Propagates {@link Orientation} multiplicatively to all descendants so root balance
+ * polarity emerges from the hierarchy rather than from hardcoded debit/credit labels.
+ */
 export class AccountFolder {
     constructor(
         public name: string,
@@ -145,6 +167,11 @@ export class AccountFolder {
     }
 }
 
+/**
+ * Per-position lot store for a single {@link Account}. Holds the raw {@link TXO} and
+ * {@link TXI} lists and implements the generation logic using the account's configured
+ * {@link DisposalMethod}s. Not instantiated directly — created on demand by `Account.getEngine`.
+ */
 export class AccountEngine {
     public readonly txos: TXO[] = [];
     public readonly txis: TXI[] = [];
