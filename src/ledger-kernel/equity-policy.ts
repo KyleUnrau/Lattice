@@ -217,6 +217,11 @@ export function expense(
     };
 }
 
+export interface ExchangeResolution {
+    resolution: RecaptureResolution;
+    forwardExchange: Exchange | null;
+}
+
 /**
  * Records an exchange of inputs into `targetPosition`.
  *
@@ -243,7 +248,7 @@ export function exchange(
     actualProceeds: number,
     engine: BookValueEngine,
     transactions: Transaction[]
-): { resolution: RecaptureResolution; actualExchange: Exchange } {
+): { resolution: RecaptureResolution; forwardExchange: Exchange | null } {
     const consumedTXOs = consumedTXOsFromInputs(inputs);
     const resolution = computeRecaptureResolution(
         consumedTXOs, targetPosition, actualProceeds, engine, transactions
@@ -251,10 +256,20 @@ export function exchange(
 
     const totalConsumed = consumedTXOs.reduce((sum, c) => sum + c.quantity, 0);
     const inputPosition = consumedTXOs[0]!.source.position;
-    const actualExchange = new Exchange(
-        { quantity: totalConsumed, position: inputPosition },
-        { quantity: actualProceeds, position: targetPosition }
-    );
 
-    return { resolution, actualExchange };
+    // Only create actualExchange when recapture alone cannot carry the full basis chain.
+    // When there is no gain/loss AND no origin (basis-less) portion, pure recapture
+    // settles all open positions cleanly without creating unnecessary Exchange objects.
+    const needsActualExchange =
+        Math.abs(resolution.residualQuantity) > Number.EPSILON ||
+        resolution.newExchangeToQuantity > Number.EPSILON;
+
+    const forwardExchange = needsActualExchange
+        ? new Exchange(
+            { quantity: totalConsumed, position: inputPosition },
+            { quantity: actualProceeds, position: targetPosition }
+          )
+        : null;
+
+    return { resolution, forwardExchange };
 }
