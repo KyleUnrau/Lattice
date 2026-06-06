@@ -4,7 +4,7 @@ import type { Position } from "./positions.js";
 import type { Transaction } from "./transactions.js";
 import { UTXI, UTXOConsumption, type Input } from "./transactions/inputs.js";
 import { UTXO, type Output, type UTXIConsumption } from "./transactions/outputs.js";
-import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI, ResidualUTXO, type Exchange } from "./transactions/exchange.js";
+import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI, ResidualUTXO, type Exchange } from "./transactions/cross-position.js";
 
 export type AccountNode = Account | AccountFolder | ComputedAccount;
 

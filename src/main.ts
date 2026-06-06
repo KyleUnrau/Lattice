@@ -8,9 +8,12 @@ import { Transaction } from "./ledger-kernel/transactions.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
 import { Account, AccountFolder, ExchangePositionsAccount, ResidualAccount } from "./ledger-kernel/accounts.js";
 import type { Position } from "./ledger-kernel/positions.js";
-import { Exchange, ResidualUTXI, ResidualUTXO } from "./ledger-kernel/transactions/exchange.js";
+import { Exchange } from "./ledger-kernel/transactions/cross-position.js";
 import { BookValueEngine } from "./ledger-kernel/book-value/engine.js";
-import { expense, exchange, type RecaptureResolution, type ExpenseResolution } from "./ledger-kernel/equity-policy.js";
+import { exchange, type ExchangeResolution } from "./ledger-kernel/equity-policy/exchange.js";
+import { expense, ExpenseResolution } from "./ledger-kernel/equity-policy/expense.js";
+import { computeRecaptureResolution, groupRecapturesByExchange } from "./ledger-kernel/equity-policy/recapture.js";
+import { consumedUTXOsFromInputs } from "./ledger-kernel/equity-policy/utils.js";
 
 // Positions
 const btc: Position = { name: "Bitcoin" };
@@ -57,30 +60,19 @@ function phase0(): TransactionConstruct {
 function phase1(): {
     from: TransactionConstruct,
     to: TransactionConstruct,
-    exchange: RecaptureResolution
+    exchange: ExchangeResolution
 } {
     const fromInputs = wallet.generateInputs(btc, 0.01, ledger.transactions);
     const swap = exchange(fromInputs, cad, 1000, engine, ledger.transactions, capitalGains);
 
-    // Consuming side: close any recaptured prior exchanges, then open the forward exchange (if any).
-    const fromOutputs: Output[] = [
-        ...swap.recaptures.map(r => r.from),
-        ...(swap.exchange ? [swap.exchange.from] : []),
-        ...(swap.residual instanceof ResidualUTXO ? [swap.residual] : []),
-    ];
+    const fromOutputs: Output[] = swap.getFromOutputs();
     const from: TransactionConstruct = {
         inputs: fromInputs,
         outputs: fromOutputs,
         transaction: ledger.newTransaction(fromInputs, fromOutputs),
     };
 
-    // Receiving side: re-open recaptured prior-exchange from-sides, the forward exchange to-side,
-    // and any gain residual — together they fund the actual proceeds output.
-    const toInputs: Input[] = [
-        ...swap.recaptures.map(r => r.to),
-        ...(swap.exchange ? [swap.exchange.to] : []),
-        ...(swap.residual instanceof ResidualUTXI ? [swap.residual] : []),
-    ];
+    const toInputs: Input[] = swap.getToInputs();
     const toOutputs: Output[] = cash.generateOutputs(cad, 1000, ledger.transactions);
     const to: TransactionConstruct = {
         inputs: toInputs,
@@ -96,7 +88,7 @@ function phase2(): {
     from: TransactionConstruct,
     to: TransactionConstruct,
     expenseTransactions: Transaction[],
-    cadExchange: RecaptureResolution,
+    cadExchange: ExchangeResolution,
     expenseResolution: ExpenseResolution
 } {
     const exchangeInputs = cash.generateInputs(cad, 500, ledger.transactions);
@@ -105,15 +97,9 @@ function phase2(): {
     const cadExchange = exchange(exchangeInputs, usd, 375, engine, ledger.transactions, capitalGains);
     const expenseRes  = expense(expenseInputs, engine, ledger.transactions);
 
-    // Consuming tx: close any exchange recaptures, open the forward exchange (if any), handle
-    // expense recapture froms and origin expense outputs — all in one combined transaction.
     const fromOutputs: Output[] = [
-        ...cadExchange.recaptures.map(r => r.from),
-        ...(cadExchange.exchange ? [cadExchange.exchange.from] : []),
-        ...(cadExchange.residual instanceof ResidualUTXO ? [cadExchange.residual] : []),
-        ...expenseRes.recaptureGroups.flatMap(g => g.recaptures.map(r => r.from)),
-        ...expenseRes.originAmounts.flatMap(o =>
-            exchangeExpense.generateOutputs(o.position, o.quantity, ledger.transactions)),
+        ...cadExchange.getFromOutputs(),
+        ...expenseRes.getFromOutputs(exchangeExpense, ledger.transactions),
     ];
     const fromInputs = [...exchangeInputs, ...expenseInputs];
     const from: TransactionConstruct = {
@@ -122,20 +108,10 @@ function phase2(): {
         transaction: ledger.newTransaction(fromInputs, fromOutputs),
     };
 
-    // One expense tx per origin position: recapture.to → exchangeExpense
-    const expenseTransactions = expenseRes.recaptureGroups.map(group =>
-        ledger.newTransaction(
-            group.recaptures.map(r => r.to),
-            exchangeExpense.generateOutputs(group.position, group.totalQuantity, ledger.transactions)
-        )
-    );
+    const expenseTransactions = expenseRes.createTransactions(exchangeExpense, ledger);
 
     // Receiving tx: re-open exchange recapture from-sides, forward exchange to-side, gain residual.
-    const toInputs: Input[] = [
-        ...cadExchange.recaptures.map(r => r.to),
-        ...(cadExchange.exchange ? [cadExchange.exchange.to] : []),
-        ...(cadExchange.residual instanceof ResidualUTXI ? [cadExchange.residual] : []),
-    ];
+    const toInputs: Input[] = cadExchange.getToInputs();
     const toOutputs = cash.generateOutputs(usd, 375, ledger.transactions);
     const to: TransactionConstruct = {
         inputs: toInputs,
@@ -150,7 +126,7 @@ function phase2(): {
 function phase3(): {
     from: TransactionConstruct,
     to: TransactionConstruct,
-    usdExchange: RecaptureResolution
+    usdExchange: ExchangeResolution
 } {
     const actualProceeds = 550;
     const usdInputs = cash.generateInputs(usd, 375, ledger.transactions);
@@ -158,11 +134,7 @@ function phase3(): {
 
     // Consuming tx: close recaptured prior exchanges, then open the forward exchange (if any).
     // For phase3 the full 375 USD traces to cadExchange, so exchange is null — recaptures only.
-    const fromOutputs: Output[] = [
-        ...usdExchange.recaptures.map(r => r.from),
-        ...(usdExchange.exchange ? [usdExchange.exchange.from] : []),
-        ...(usdExchange.residual instanceof ResidualUTXO ? [usdExchange.residual] : []),
-    ];
+    const fromOutputs: Output[] = usdExchange.getFromOutputs();
     const from: TransactionConstruct = {
         inputs: usdInputs,
         outputs: fromOutputs,
@@ -170,12 +142,8 @@ function phase3(): {
     };
 
     // Receiving tx: re-open recapture from-sides, forward exchange to-side, gain residual.
-    // The 50 CAD gain (residualQuantity) lands in capitalGains via ResidualUTXI.
-    const toInputs: Input[] = [
-        ...usdExchange.recaptures.map(r => r.to),
-        ...(usdExchange.exchange ? [usdExchange.exchange.to] : []),
-        ...(usdExchange.residual instanceof ResidualUTXI ? [usdExchange.residual] : []),
-    ];
+    // The 50 CAD gain lands in capitalGains as a ResidualUTXI.
+    const toInputs: Input[] = usdExchange.getToInputs();
     const toOutputs = cash.generateOutputs(cad, actualProceeds, ledger.transactions);
     const to: TransactionConstruct = {
         inputs: toInputs,
@@ -220,6 +188,9 @@ runCLI({
     BookValueEngine,
     expense,
     exchange,
+    consumedUTXOsFromInputs,
+    computeRecaptureResolution,
+    groupRecapturesByExchange,
     runCLI,
     phase0,
     phase1,

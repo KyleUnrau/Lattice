@@ -1,4 +1,4 @@
-import type { Exchange } from "../transactions/exchange.js";
+import type { Exchange } from "../transactions/cross-position.js";
 import type { Position } from "../positions.js";
 import type { BookValueEngine } from "./engine.js";
 

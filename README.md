@@ -76,7 +76,7 @@ Union types:
 Cross-position transfers are modeled as `Exchange` objects that lock a conversion rate at creation time. The `exchange()` equity-policy function is the primary way to create exchanges — it handles prior lineage recapture, forward exchange creation, and residual gain/loss recognition in one step. See the [Equity Policy](#equity-policy) section.
 
 ```ts
-// Exchange kernel primitives (from transactions/exchange.ts)
+// Exchange kernel primitives (from transactions/cross-position.ts)
 exchange.from  // ExchangedUTXO — the "from" side; goes in the source transaction's outputs
 exchange.to    // ExchangedUTXI — the "to" side; goes in the destination transaction's inputs
 ```
@@ -251,7 +251,7 @@ type BasisPath = OriginPath | ExchangePath | ResidualPath;
 
 ## Equity Policy
 
-The equity policy (`equity-policy.ts`) answers two questions: *"How should consumed inputs be attributed back to their origin position?"* and *"How should gains and losses be recognized without breaking the basis chain?"*
+The equity policy module (split across `equity-policy/exchange.ts`, `equity-policy/expense.ts`, `equity-policy/recapture.ts`, and `equity-policy/utils.ts`) answers two questions: *"How should consumed inputs be attributed back to their origin position?"* and *"How should gains and losses be recognized without breaking the basis chain?"*
 
 ### collectRecaptureableNodes
 
@@ -274,7 +274,7 @@ computeRecaptureResolution(
     totalActualReceived: number,
     engine: BookValueEngine,
     transactions: Transaction[]
-): Omit<RecaptureResolution, 'exchange' | 'residual'>
+): RecaptureComputation
 ```
 
 Full resolution pipeline:
@@ -282,7 +282,7 @@ Full resolution pipeline:
 2. Collect and group recapturable nodes by exchange.
 3. Call `exchange.recapture(toSideQuantity, transactions)` for each → produces `ExchangeRecapture[]`.
 4. Compute `totalActualForRecaptured = totalActualReceived × (totalRecapturedToSide / totalConsumed)`.
-5. Return partial resolution (without `exchange` and `residual`, which are added by `exchange()`):
+5. Return `RecaptureComputation` — an internal intermediate type consumed by `exchange()`:
 
 ```ts
 {
@@ -310,9 +310,22 @@ expense(inputs: Input[], engine: BookValueEngine, transactions: Transaction[]): 
 
 Records an expense by tracing the top-level basis paths of all consumed inputs. Exchange and residual paths are recaptured at locked rates and grouped by origin position, so each portion of the expense is recognised in the position it was originally derived from. Origin-path amounts (no exchange lineage) are surfaced as direct expense amounts in their own position.
 
-Returns an `ExpenseResolution` with:
-- `recaptureGroups` — one `ExpenseRecaptureGroup` per distinct origin position; each group drives a separate expense transaction.
-- `originAmounts` — portions with no exchange lineage; expensed directly in the consuming transaction.
+Returns an `ExpenseResolution`:
+
+```ts
+class ExpenseResolution {
+    recaptureGroups: ExpenseRecaptureGroup[];        // one group per origin position; each drives an expense tx
+    originAmounts: { position, quantity }[];         // no exchange lineage; direct expense in consuming tx
+
+    getFromOutputs(account: Account, transactions: Transaction[]): Output[]
+    getExpenseEntries(account: Account, transactions: Transaction[]): { inputs: Input[]; outputs: Output[] }[]
+    createTransactions(account: Account, ledger: Ledger): Transaction[]
+}
+```
+
+`getFromOutputs` assembles the consuming transaction's expense outputs: recapture from-sides (settling prior exchange to-sides) followed by direct expense outputs generated into `account` for any origin amounts. Call before committing the consuming transaction.
+
+`getExpenseEntries` returns one `{ inputs, outputs }` pair per recapture group for manual construction of expense transactions. `createTransactions` wraps this and commits each pair via `ledger.newTransaction` — call after committing the consuming transaction.
 
 ### exchange
 
@@ -324,54 +337,56 @@ exchange(
     engine: BookValueEngine,
     transactions: Transaction[],
     residualAccount: ResidualAccount
-): RecaptureResolution
+): ExchangeResolution
 ```
 
-Records an exchange of inputs into `targetPosition`. Traces the basis of consumed inputs, separates them into recaptured and origin portions, and returns a complete `RecaptureResolution`:
+Records an exchange of inputs into `targetPosition`. Traces the basis of consumed inputs, separates them into recaptured and origin portions, and returns an `ExchangeResolution`:
 
 ```ts
-type RecaptureResolution = {
-    recaptures: ExchangeRecapture[];        // close prior exchange positions (for both tx construction and reporting)
-    totalCostBasis: number;                 // aggregate cost of recaptured portion at locked rate
-    residualQuantity: number;               // gain (positive) or loss (negative) on recaptured portion
-    newExchangeToQuantity: number;          // origin quantity (no prior exchange lineage)
-    newExchangeFromQuantity: number;        // prorated proceeds for origin portion
-    exchange: Exchange | null;              // forward exchange covering origin portion only
-    residual: ResidualUTXI | ResidualUTXO | null;  // gain/loss lot registered in residualAccount
-};
+class ExchangeResolution {
+    recaptures: ExchangeRecapture[];               // close prior exchange positions; used for tax reporting
+    exchange: Exchange | null;                     // forward exchange for the origin portion; null on pure recapture
+    residual: ResidualUTXI | ResidualUTXO | null;  // gain/loss lot registered in residualAccount; null if break-even
+
+    getFromOutputs(): Output[]   // outputs for the consuming transaction
+    getToInputs(): Input[]       // inputs for the receiving transaction
+}
 ```
 
-**Recaptured portion** — inputs with prior exchange lineage in `targetPosition`. Each prior exchange is settled via a `ExchangeRecapture`. The prorated actual proceeds versus `totalCostBasis` yields a `residualQuantity` gain or loss, surfaced as a `residual` lot registered directly in `residualAccount`.
+**Recaptured portion** — inputs with prior exchange lineage in `targetPosition`. Each prior exchange is settled via a `ExchangeRecapture`. The prorated actual proceeds versus cost basis yields a gain or loss, surfaced as a `residual` lot registered directly in `residualAccount`.
 
-**Origin portion** — inputs with no prior exchange lineage (`newExchangeToQuantity > ε`). A forward `exchange` is created at the actual market rate covering only the origin portion, creating new suspended cost basis that can be recaptured and produce a residual in a subsequent transaction.
+**Origin portion** — inputs with no prior exchange lineage. A forward `exchange` is created at the actual market rate covering only the origin portion, creating new suspended cost basis that can be recaptured and produce a residual in a subsequent transaction.
 
-**Pure-recapture case** — when all consumed inputs trace entirely to prior exchanges in `targetPosition`, `newExchangeToQuantity === 0` and `exchange` is `null`. No new suspended cost basis is created; the residual (if non-zero) is tagged `null` and the basis engine treats it as an origin path.
+**Pure-recapture case** — when all consumed inputs trace entirely to prior exchanges in `targetPosition`, `exchange` is `null`. No new suspended cost basis is created; the residual (if non-zero) is tagged `null` and the basis engine treats it as an origin path.
 
 ### Transaction Construction Pattern
 
-After calling `exchange()`, all seven possible components of the result should be checked and included appropriately:
+After calling `exchange()`, use the `ExchangeResolution` methods to build the transaction entry arrays:
 
 ```ts
 const swap = exchange(fromInputs, targetPosition, actualProceeds, engine, ledger.transactions, capitalGains);
 
-// consuming transaction outputs: close prior exchanges, open forward exchange, emit loss residual
-const fromOutputs: Output[] = [
-    ...swap.recaptures.map(r => r.from),                              // UTXIConsumption — settles prior exchange to-sides
-    ...(swap.exchange ? [swap.exchange.from] : []),                   // ExchangedUTXO  — opens forward exchange from-side
-    ...(swap.residual instanceof ResidualUTXO ? [swap.residual] : []) // ResidualUTXO   — recognized loss
-];
+// consuming transaction: close prior exchanges, open forward exchange, emit any loss residual
+const fromOutputs: Output[] = swap.getFromOutputs();
 ledger.newTransaction(fromInputs, fromOutputs);
 
-// receiving transaction inputs: re-open recaptured from-sides, forward exchange to-side, emit gain residual
-const toInputs: Input[] = [
-    ...swap.recaptures.map(r => r.to),                               // UTXOConsumption — reclaims prior exchange from-sides
-    ...(swap.exchange ? [swap.exchange.to] : []),                    // ExchangedUTXI  — opens forward exchange to-side
-    ...(swap.residual instanceof ResidualUTXI ? [swap.residual] : []) // ResidualUTXI   — recognized gain
-];
+// receiving transaction: re-open recaptured from-sides, forward exchange to-side, emit any gain residual
+const toInputs: Input[] = swap.getToInputs();
 ledger.newTransaction(toInputs, cash.generateOutputs(targetPosition, actualProceeds, ledger.transactions));
+```
 
-// swap.residualQuantity — gain (positive) or loss (negative) for tax reporting
-// swap.totalCostBasis   — cost basis of the recaptured portion at original locked rates
+`getFromOutputs()` assembles `recaptures[i].from` (`UTXIConsumption`), `exchange.from` (`ExchangedUTXO`), and `residual` if it is a `ResidualUTXO`. `getToInputs()` assembles `recaptures[i].to` (`UTXOConsumption`), `exchange.to` (`ExchangedUTXI`), and `residual` if it is a `ResidualUTXI`. Null components are omitted automatically.
+
+When expense recaptures are combined with exchange recaptures in a single consuming transaction, spread both `getFromOutputs()` calls, then use `createTransactions` for the separate expense transactions after the consuming transaction commits:
+
+```ts
+const fromOutputs: Output[] = [
+    ...cadExchange.getFromOutputs(),
+    ...expenseRes.getFromOutputs(exchangeExpense, ledger.transactions),
+];
+ledger.newTransaction(fromInputs, fromOutputs);  // consuming tx commits here
+
+const expenseTransactions = expenseRes.createTransactions(exchangeExpense, ledger);
 ```
 
 ---
@@ -411,28 +426,17 @@ After all four phases: `ledger.verify()` passes; `capitalGains` carries a −50 
 
 ### Phase Functions
 
-Each phase function follows the universal pattern — check recaptures, forward exchange, and residual, then include all non-null components:
+Each phase function calls `exchange()` and builds its transactions using the returned `ExchangeResolution` methods:
 
 ```ts
 function phase3() {
     const usdInputs = cash.generateInputs(usd, 375, ledger.transactions);
     const usdExchange = exchange(usdInputs, cad, 550, engine, ledger.transactions, capitalGains);
     // usdExchange.exchange === null  (pure recapture — all USD traced to cadExchange)
-    // usdExchange.residual instanceof ResidualUTXI  (50 CAD gain)
+    // usdExchange.residual instanceof ResidualUTXI  (50 CAD gain, registered in capitalGains)
 
-    const fromOutputs: Output[] = [
-        ...usdExchange.recaptures.map(r => r.from),
-        ...(usdExchange.exchange ? [usdExchange.exchange.from] : []),
-        ...(usdExchange.residual instanceof ResidualUTXO ? [usdExchange.residual] : []),
-    ];
-    ledger.newTransaction(usdInputs, fromOutputs);
-
-    const toInputs: Input[] = [
-        ...usdExchange.recaptures.map(r => r.to),
-        ...(usdExchange.exchange ? [usdExchange.exchange.to] : []),
-        ...(usdExchange.residual instanceof ResidualUTXI ? [usdExchange.residual] : []),
-    ];
-    ledger.newTransaction(toInputs, cash.generateOutputs(cad, 550, ledger.transactions));
+    ledger.newTransaction(usdInputs, usdExchange.getFromOutputs());
+    ledger.newTransaction(usdExchange.getToInputs(), cash.generateOutputs(cad, 550, ledger.transactions));
 }
 ```
 
@@ -453,12 +457,17 @@ src/
     ├── accounts.ts                            Account, AccountFolder, AccountEngine,
     │                                          ComputedAccount, ExchangePositionsAccount,
     │                                          ResidualAccount
-    ├── equity-policy.ts                       exchange(), expense(), computeRecaptureResolution(),
-    │                                          consumedUTXOsFromInputs(), RecaptureResolution
+    ├── equity-policy/
+    │   ├── exchange.ts                        exchange(), ExchangeResolution
+    │   ├── expense.ts                         expense(), ExpenseResolution, ExpenseRecaptureGroup
+    │   ├── recapture.ts                       computeRecaptureResolution(),
+    │   │                                      collectRecaptureableNodes(),
+    │   │                                      groupRecapturesByExchange()
+    │   └── utils.ts                           consumedUTXOsFromInputs()
     ├── transactions/
     │   ├── inputs.ts                          UTXI, UTXOConsumption, type Input
     │   ├── outputs.ts                         UTXO, UTXIConsumption, type Output
-    │   └── exchange.ts                        Exchange, ExchangedUTXO/UTXI,
+    │   └── cross-position.ts                 Exchange, ExchangedUTXO/UTXI,
     │                                          ResidualUTXO/UTXI, ExchangeRecapture
     ├── disposal-methods/
     │   ├── disposals.ts                       DisposalMethod<T extends UTXO | UTXI>

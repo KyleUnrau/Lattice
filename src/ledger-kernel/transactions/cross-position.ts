@@ -1,7 +1,8 @@
+import type { ExchangeRecapture } from "../equity-policy/exchange.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import { UTXI, UTXOConsumption } from "./inputs.js";
-import { UTXIConsumption, UTXO } from "./outputs.js";
+import { UTXI } from "./inputs.js";
+import { UTXO } from "./outputs.js";
 
 /**
  * Links two single-position transactions through a locked conversion rate.
@@ -40,14 +41,6 @@ export class Exchange {
             to: this.from.consume(toQuantity, transactions)
         };
     }
-}
-
-/** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
-export interface ExchangeRecapture {
-    /** {@link UTXIConsumption} settling the to-side of the original exchange. Goes in a transaction's outputs. */
-    from: UTXIConsumption;
-    /** {@link UTXOConsumption} reclaiming the from-side of the original exchange. Goes in a transaction's inputs. */
-    to: UTXOConsumption
 }
 
 /** The from-side of an {@link Exchange} — value given away; placed in a transaction's outputs. */
@@ -107,3 +100,5 @@ export class ResidualUTXI extends UTXI {
         public readonly exchange: Exchange | null
     ) { super(quantity, position); }
 }
+
+

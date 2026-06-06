@@ -1,4 +1,4 @@
-import { ExchangedUTXI, ResidualUTXI } from "../transactions/exchange.js";
+import { ExchangedUTXI, ResidualUTXI } from "../transactions/cross-position.js";
 import { UTXI, UTXOConsumption, type Input } from "../transactions/inputs.js";
 import { UTXO } from "../transactions/outputs.js";
 import type { Transaction } from "../transactions.js";
