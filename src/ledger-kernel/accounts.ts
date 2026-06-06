@@ -6,7 +6,7 @@ import { TXI, TXOConsumption, type Input } from "./transactions/inputs.js";
 import { TXO, type Output, type TXIConsumption } from "./transactions/outputs.js";
 import { ExchangedTXI, ExchangedTXO, ResidualTXI, ResidualTXO, type Exchange } from "./transactions/exchange.js";
 
-export type AccountNode = Account | AccountFolder | ExchangePositionsAccount;
+export type AccountNode = Account | AccountFolder | ComputedAccount;
 
 /**
  * Manages per-position {@link AccountEngine}s containing TXO and TXI lots. Implements
@@ -64,28 +64,6 @@ export class Account {
     public generateOutputs(position: Position, quantity: number, transactions: Transaction[]): Output[] {
         return this.getEngine(position).generateOutputs(quantity, transactions);
     }
-
-    /**
-     * Creates a {@link ResidualTXI} tagged to `exchange` and registers it in the position engine.
-     * Used to represent a gain above an exchange's locked rate while preserving the exchange
-     * lineage for future basis tracing.
-     */
-    public generateResidualInput(position: Position, quantity: number, exchange: Exchange): ResidualTXI {
-        const txi = new ResidualTXI(quantity, position, exchange);
-        this.getEngine(position).txis.push(txi);
-        return txi;
-    }
-
-    /**
-     * Creates a {@link ResidualTXO} tagged to `exchange` and registers it in the position engine.
-     * Used to represent a loss below an exchange's locked rate while preserving the exchange
-     * lineage for future basis tracing.
-     */
-    public generateResidualOutput(position: Position, quantity: number, exchange: Exchange): ResidualTXO {
-        const txo = new ResidualTXO(quantity, position, exchange);
-        this.getEngine(position).txos.push(txo);
-        return txo;
-    }
 }
 
 /**
@@ -125,6 +103,24 @@ export class AccountFolder {
         txiDisposalMethod: DisposalMethod<TXI>
     ): Account {
         const child = new Account(name, localOrientation, this, txoDisposalMethod, txiDisposalMethod);
+        this.addChild(child);
+        return child;
+    }
+
+    public addResidualAccount(
+        name: string,
+        localOrientation: Orientation
+    ): ResidualAccount {
+        const child = new ResidualAccount(name, localOrientation);
+        this.addChild(child);
+        return child;
+    }
+
+    public addExchangeAccount(
+        name: string,
+        localOrientation: Orientation
+    ): ExchangePositionsAccount {
+        const child = new ExchangePositionsAccount(name, localOrientation);
         this.addChild(child);
         return child;
     }
@@ -243,41 +239,59 @@ export class AccountEngine {
 }
 
 /**
- * Represents the open exchange positions across all transactions as an equity account.
- * Its balance mirrors the uncaptured residuals of every ExchangedTXO/ExchangedTXI,
- * making exchange positions visible inside the equity structure rather than as a fudge
- * factor in the ledger's root balance check.
- *
- * Adding this as a child of the equity folder with the same orientation as regular
- * equity sub-accounts ensures that `equity.getBalances() === netAssets.getBalances()`
- * exactly, with no external adjustment needed.
+ * Base class for read-only accounts whose balance is derived by scanning the transaction
+ * history rather than being tracked via explicit lot entries. Subclasses implement
+ * `getRootBalance` and `getRootBalances`; the common orientation and display logic lives here.
+ * No `generateInputs` or `generateOutputs` — these accounts cannot be used as sources or
+ * destinations in transaction construction.
  */
-export class ExchangePositionsAccount {
-    public name: string;
-    public localOrientation: Orientation;
+export abstract class ComputedAccount {
     public parent: AccountFolder | null = null;
 
-    constructor(name: string, localOrientation: Orientation) {
-        this.name = name;
-        this.localOrientation = localOrientation;
-    }
+    constructor(
+        public name: string,
+        public localOrientation: Orientation
+    ) {}
 
     public getRootOrientation(): Orientation {
         if (this.parent === null) return this.localOrientation;
         return this.parent.getRootOrientation() * this.localOrientation;
     }
 
+    public abstract getRootBalance(position: Position, transactions: Transaction[]): number;
+    public abstract getRootBalances(transactions: Transaction[]): Map<Position, number>;
+
+    public getBalance(position: Position, transactions: Transaction[]): number {
+        return this.getRootBalance(position, transactions) * this.getRootOrientation();
+    }
+
+    public getBalances(transactions: Transaction[]): Map<Position, number> {
+        const result = new Map<Position, number>();
+        for (const [position, rootBalance] of this.getRootBalances(transactions))
+            result.set(position, rootBalance * this.getRootOrientation());
+        return result;
+    }
+}
+
+/**
+ * Tracks all open exchange positions across the transaction history as an equity account.
+ * Scans every {@link ExchangedTXO} (from-side) and {@link ExchangedTXI} (to-side) for their
+ * remaining availability. Matched exchange pairs at the same locked rate cancel to zero, so
+ * only truly unresolved positions carry a balance.
+ *
+ * Adding this as a child of the equity folder ensures `equity.getRootBalances()` includes
+ * open positions automatically — no adjustment is needed inside `ledger.verify()`.
+ */
+export class ExchangePositionsAccount extends ComputedAccount {
     public getRootBalance(position: Position, transactions: Transaction[]): number {
         let balance = 0;
         for (const tx of transactions) {
-            for (const output of tx.outputs) {
+            for (const output of tx.outputs)
                 if (output instanceof ExchangedTXO && output.position === position)
                     balance += output.calculateAvailable(transactions);
-            }
-            for (const input of tx.inputs) {
+            for (const input of tx.inputs)
                 if (input instanceof ExchangedTXI && input.position === position)
                     balance -= input.calculateAvailable(transactions);
-            }
         }
         return balance;
     }
@@ -297,15 +311,54 @@ export class ExchangePositionsAccount {
         }
         return result;
     }
+}
 
-    public getBalance(position: Position, transactions: Transaction[]): number {
-        return this.getRootBalance(position, transactions) * this.getRootOrientation();
+/**
+ * Tracks recognized gains and losses from exchanges as an equity account. Unlike the scan-based
+ * {@link ExchangePositionsAccount}, this account owns its residual lots directly — each
+ * {@link ResidualTXI} (gain) and {@link ResidualTXO} (loss) is registered here via
+ * {@link addResidualInput} / {@link addResidualOutput}, called by the `exchange()` equity-policy
+ * function. Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains", "Profit") can coexist
+ * without crosstalk because each owns its own lot lists.
+ *
+ * Gains reduce the root balance (increasing equity inside a positive-orientation equity folder
+ * like netIncome); losses increase it.
+ */
+export class ResidualAccount extends ComputedAccount {
+    private readonly txis: ResidualTXI[] = [];
+    private readonly txos: ResidualTXO[] = [];
+
+    public addResidualInput(quantity: number, position: Position, exchange: Exchange | null): ResidualTXI {
+        const txi = new ResidualTXI(quantity, position, exchange);
+        this.txis.push(txi);
+        return txi;
     }
 
-    public getBalances(transactions: Transaction[]): Map<Position, number> {
+    public addResidualOutput(quantity: number, position: Position, exchange: Exchange | null): ResidualTXO {
+        const txo = new ResidualTXO(quantity, position, exchange);
+        this.txos.push(txo);
+        return txo;
+    }
+
+    public getRootBalance(position: Position, transactions: Transaction[]): number {
+        let balance = 0;
+        for (const txi of this.txis)
+            if (txi.position === position) balance -= txi.calculateAvailable(transactions);
+        for (const txo of this.txos)
+            if (txo.position === position) balance += txo.calculateAvailable(transactions);
+        return balance;
+    }
+
+    public getRootBalances(transactions: Transaction[]): Map<Position, number> {
+        const positions = new Set<Position>([
+            ...this.txis.map(t => t.position),
+            ...this.txos.map(t => t.position),
+        ]);
         const result = new Map<Position, number>();
-        for (const [position, rootBalance] of this.getRootBalances(transactions))
-            result.set(position, rootBalance * this.getRootOrientation());
+        for (const position of positions) {
+            const balance = this.getRootBalance(position, transactions);
+            if (balance !== 0) result.set(position, balance);
+        }
         return result;
     }
 }

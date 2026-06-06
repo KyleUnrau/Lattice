@@ -74,8 +74,11 @@ export class ExchangedTXI extends TXI {
 
 /**
  * A loss (shortfall) relative to an exchange's locked rate, tagged to its originating exchange.
- * Placed in a transaction's outputs; carries `.exchange` so the basis engine can follow the
- * lineage back through the loss when tracing subsequent transactions.
+ * Placed in a transaction's outputs. Ownership (which {@link ResidualAccount} this belongs to) is
+ * tracked by the account itself, not by this primitive.
+ *
+ * When `exchange` is non-null the basis engine traces lineage through the exchange's from-side.
+ * When `exchange` is null (pure-recapture case) the engine treats this as an origin path.
  */
 export class ResidualTXO extends TXO {
     public type = "residual-txo";
@@ -83,14 +86,17 @@ export class ResidualTXO extends TXO {
     constructor(
         quantity: number,
         position: Position,
-        public readonly exchange: Exchange
+        public readonly exchange: Exchange | null
     ) { super(quantity, position); }
 }
 
 /**
  * A gain (surplus) relative to an exchange's locked rate, tagged to its originating exchange.
- * Placed in a transaction's inputs; carries `.exchange` so the basis engine can follow the
- * lineage back through the gain when tracing subsequent transactions.
+ * Placed in a transaction's inputs. Ownership (which {@link ResidualAccount} this belongs to) is
+ * tracked by the account itself, not by this primitive.
+ *
+ * When `exchange` is non-null the basis engine traces lineage through the exchange's from-side.
+ * When `exchange` is null (pure-recapture case) the engine treats this as an origin path.
  */
 export class ResidualTXI extends TXI {
     public type = "residual-txi";
@@ -98,6 +104,6 @@ export class ResidualTXI extends TXI {
     constructor(
         quantity: number,
         position: Position,
-        public readonly exchange: Exchange
+        public readonly exchange: Exchange | null
     ) { super(quantity, position); }
 }

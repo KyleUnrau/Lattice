@@ -74,6 +74,11 @@ export class BookValueEngine {
         }
 
         if (input instanceof ResidualTXI) {
+            if (input.exchange === null) {
+                // Pure-recapture residual: no forward exchange was created, so no further
+                // lineage can be traced. Treat as origin in the current position.
+                return [{ type: "origin", quantity, position: input.position } satisfies OriginPath];
+            }
             const ex = input.exchange;
             const fromQty = quantity * (ex.from.quantity / ex.to.quantity);
             const basis = this.traceTXO(ex.from, fromQty, visited);

@@ -1,5 +1,6 @@
 import type { Exchange } from "../transactions/exchange.js";
 import type { Position } from "../positions.js";
+import type { BookValueEngine } from "./engine.js";
 
 /** A node in the cost basis tree returned by {@link BookValueEngine.compute}. */
 export type BasisPath = OriginPath | ExchangePath | ResidualPath;
