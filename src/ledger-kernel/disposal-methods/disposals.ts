@@ -1,5 +1,5 @@
-import { TXO } from "../transactions/outputs.js";
-import { TXI } from "../transactions/inputs.js";
+import { UTXO } from "../transactions/outputs.js";
+import { UTXI } from "../transactions/inputs.js";
 import type { Transaction } from "../transactions.js";
 
 /**
@@ -8,4 +8,4 @@ import type { Transaction } from "../transactions.js";
  * `transactions` is required because lot availability is computed dynamically from history,
  * not stored on the lot itself.
  */
-export type DisposalMethod<T extends TXO | TXI> = (components: T[], delta: number, transactions: Transaction[]) => Map<T, number>;
+export type DisposalMethod<T extends UTXO | UTXI> = (components: T[], delta: number, transactions: Transaction[]) => Map<T, number>;

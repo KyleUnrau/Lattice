@@ -1,8 +1,8 @@
-import { Exchange, ResidualTXI, ResidualTXO } from "./transactions/exchange.js";
+import { Exchange, ResidualUTXI, ResidualUTXO } from "./transactions/exchange.js";
 import type { ExchangeRecapture } from "./transactions/exchange.js";
 import type { ResidualAccount } from "./accounts.js";
-import { TXOConsumption, type Input } from "./transactions/inputs.js";
-import { TXO } from "./transactions/outputs.js";
+import { UTXOConsumption, type Input } from "./transactions/inputs.js";
+import { UTXO } from "./transactions/outputs.js";
 import type { Transaction } from "./transactions.js";
 import type { Position } from "./positions.js";
 import { BookValueEngine } from "./book-value/engine.js";
@@ -18,8 +18,8 @@ type RecaptureableNode = {
  * The resolved result of tracing consumed outputs back to a target position.
  *
  * - `recaptures` — one recapture per distinct exchange found in the lineage. Include
- *   `recapture.from` (TXIConsumption) in the consuming transaction's outputs and
- *   `recapture.to` (TXOConsumption) in the receiving transaction's inputs to close those
+ *   `recapture.from` (UTXIConsumption) in the consuming transaction's outputs and
+ *   `recapture.to` (UTXOConsumption) in the receiving transaction's inputs to close those
  *   prior exchange positions. Also used for tax reporting.
  * - `totalCostBasis` — aggregate cost in the target position across all recaptures
  * - `residualQuantity` — gain (positive) or loss (negative): prorated actual proceeds for the
@@ -31,7 +31,7 @@ type RecaptureableNode = {
  *   Use `exchange.from` in the consuming transaction's outputs and `exchange.to` in the receiving
  *   transaction's inputs. Creates new suspended cost basis that can be recaptured in a subsequent
  *   transaction. Null when all consumed inputs were fully recaptured from prior exchanges.
- * - `residual` — {@link ResidualTXI} for a gain, {@link ResidualTXO} for a loss, or `null` when
+ * - `residual` — {@link ResidualUTXI} for a gain, {@link ResidualUTXO} for a loss, or `null` when
  *   actual proceeds exactly equal cost basis. Include in the receiving transaction's inputs (gain)
  *   or outputs (loss). Tagged to the forward `exchange` (when non-null) so the basis engine can
  *   trace lineage; tagged to `null` in the pure-recapture case, where the engine treats it as an
@@ -44,7 +44,7 @@ export type RecaptureResolution = {
     newExchangeToQuantity: number;
     newExchangeFromQuantity: number;
     exchange: Exchange | null;
-    residual: ResidualTXI | ResidualTXO | null;
+    residual: ResidualUTXI | ResidualUTXO | null;
 };
 
 /**
@@ -76,7 +76,7 @@ export function collectRecaptureableNodes(basis: BasisPath[], targetPosition: Po
 /**
  * Aggregates recapturable nodes by exchange instance, summing the to-side and from-side
  * quantities across all nodes sharing the same exchange. Ensures each exchange is recaptured
- * exactly once even when its lineage appears across multiple consumed TXOs.
+ * exactly once even when its lineage appears across multiple consumed UTXOs.
  */
 export function groupRecapturesByExchange(nodes: RecaptureableNode[]): Map<Exchange, { toSideQuantity: number; fromQuantity: number }> {
     const grouped = new Map<Exchange, { toSideQuantity: number; fromQuantity: number }>();
@@ -93,7 +93,7 @@ export function groupRecapturesByExchange(nodes: RecaptureableNode[]): Map<Excha
 }
 
 /**
- * Resolves consumed TXOs against a target position given a known total proceeds amount.
+ * Resolves consumed UTXOs against a target position given a known total proceeds amount.
  *
  * For each exchange found in the basis lineage, a recapture transaction is issued at the
  * exchange's original locked rate. Proceeds are prorated across recaptured and non-recaptured
@@ -102,22 +102,22 @@ export function groupRecapturesByExchange(nodes: RecaptureableNode[]): Map<Excha
  * target-position equivalent in `newExchangeFromQuantity`. `exchange` is always `null` here —
  * it is populated by {@link exchange} after this function returns.
  *
- * @param consumedTXOs - TXOs being consumed, with the partial quantity consumed from each.
+ * @param consumedUTXOs - UTXOs being consumed, with the partial quantity consumed from each.
  * @param targetPosition - The position to resolve cost basis into (e.g. BTC).
  * @param totalActualReceived - Total proceeds in `targetPosition` for the full consumed quantity.
  * @param engine - Book value engine used to trace basis paths.
  * @param transactions - Full transaction history, required to issue recaptures.
  */
 export function computeRecaptureResolution(
-    consumedTXOs: { source: TXO; quantity: number }[],
+    consumedUTXOs: { source: UTXO; quantity: number }[],
     targetPosition: Position,
     totalActualReceived: number,
     engine: BookValueEngine,
     transactions: Transaction[]
 ): Omit<RecaptureResolution, 'exchange' | 'residual'> {
-    const totalConsumed = consumedTXOs.reduce((sum, c) => sum + c.quantity, 0);
+    const totalConsumed = consumedUTXOs.reduce((sum, c) => sum + c.quantity, 0);
 
-    const allBasis: BasisPath[] = consumedTXOs.flatMap(({ source, quantity }) => engine.compute(source, quantity));
+    const allBasis: BasisPath[] = consumedUTXOs.flatMap(({ source, quantity }) => engine.compute(source, quantity));
 
     const nodes = collectRecaptureableNodes(allBasis, targetPosition);
     const grouped = groupRecapturesByExchange(nodes);
@@ -146,12 +146,12 @@ export function computeRecaptureResolution(
 }
 
 /**
- * Extracts {@link TXOConsumption} inputs from a mixed input array, returning each as a
+ * Extracts {@link UTXOConsumption} inputs from a mixed input array, returning each as a
  * `{ source, quantity }` pair suitable for {@link computeRecaptureResolution}.
- * Non-consumption inputs (exchange inputs, origin TXIs) are silently ignored.
+ * Non-consumption inputs (exchange inputs, origin UTXIs) are silently ignored.
  */
-export function consumedTXOsFromInputs(inputs: Input[]): { source: TXO; quantity: number }[] {
-    return inputs.filter((i): i is TXOConsumption => i instanceof TXOConsumption)
+export function consumedUTXOsFromInputs(inputs: Input[]): { source: UTXO; quantity: number }[] {
+    return inputs.filter((i): i is UTXOConsumption => i instanceof UTXOConsumption)
         .map(c => ({ source: c.source, quantity: c.quantity }));
 }
 
@@ -185,7 +185,7 @@ export type ExpenseResolution = {
 /**
  * Records an expense across all exchange lineages of the consumed inputs.
  *
- * Traces the top-level basis paths for every consumed TXO. Exchange and residual
+ * Traces the top-level basis paths for every consumed UTXO. Exchange and residual
  * paths are recaptured at their locked rates and grouped by origin position, so each
  * portion of the expense is recognised in the position it was originally derived from.
  * Origin paths (no exchange lineage) are surfaced as direct expense amounts in their
@@ -201,8 +201,8 @@ export function expense(
     engine: BookValueEngine,
     transactions: Transaction[]
 ): ExpenseResolution {
-    const consumedTXOs = consumedTXOsFromInputs(inputs);
-    const allBasis = consumedTXOs.flatMap(c => engine.compute(c.source, c.quantity));
+    const consumedUTXOs = consumedUTXOsFromInputs(inputs);
+    const allBasis = consumedUTXOs.flatMap(c => engine.compute(c.source, c.quantity));
 
     const exchangeNodes: RecaptureableNode[] = [];
     const originTotals = new Map<Position, number>();
@@ -244,7 +244,7 @@ export function expense(
  * exchange is settled via a {@link ExchangeRecapture}: include `recapture.from` in the consuming
  * transaction's outputs and `recapture.to` in the receiving transaction's inputs. The prorated
  * actual proceeds versus `totalCostBasis` yields a `residualQuantity` gain or loss, surfaced as
- * a `residual` ({@link ResidualTXI} or {@link ResidualTXO}).
+ * a `residual` ({@link ResidualUTXI} or {@link ResidualUTXO}).
  *
  * **Origin portion** — inputs with no prior exchange lineage (`newExchangeToQuantity > ε`). A
  * forward `exchange` is created at the actual market rate for this portion only, creating new
@@ -271,9 +271,9 @@ export function exchange(
     transactions: Transaction[],
     residualAccount: ResidualAccount
 ): RecaptureResolution {
-    const consumedTXOs = consumedTXOsFromInputs(inputs);
+    const consumedUTXOs = consumedUTXOsFromInputs(inputs);
     const resolution = computeRecaptureResolution(
-        consumedTXOs, targetPosition, actualProceeds, engine, transactions
+        consumedUTXOs, targetPosition, actualProceeds, engine, transactions
     );
 
     // Forward exchange only when there are origin amounts (no prior exchange lineage).
@@ -281,7 +281,7 @@ export function exchange(
     // suspended cost basis for future recapture.
     const forwardExchange: Exchange | null = resolution.newExchangeToQuantity > Number.EPSILON
         ? new Exchange(
-            { quantity: resolution.newExchangeToQuantity, position: consumedTXOs[0]!.source.position },
+            { quantity: resolution.newExchangeToQuantity, position: consumedUTXOs[0]!.source.position },
             { quantity: resolution.newExchangeFromQuantity, position: targetPosition }
           )
         : null;
@@ -290,7 +290,7 @@ export function exchange(
     // Registered directly in residualAccount so it is isolated from other ResidualAccounts.
     // Tagged to the forward exchange for basis tracing when one exists; null in the
     // pure-recapture case (engine treats it as an origin path).
-    const residual: ResidualTXI | ResidualTXO | null =
+    const residual: ResidualUTXI | ResidualUTXO | null =
         Math.abs(resolution.residualQuantity) > Number.EPSILON
             ? resolution.residualQuantity > 0
                 ? residualAccount.addResidualInput(resolution.residualQuantity, targetPosition, forwardExchange)

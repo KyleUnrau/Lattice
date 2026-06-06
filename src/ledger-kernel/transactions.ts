@@ -1,7 +1,7 @@
 import type { Result } from "../utils.js";
 import type { Position } from "./positions.js";
-import { TXI, TXOConsumption, type Input } from "./transactions/inputs.js";
-import { TXIConsumption, TXO, type Output } from "./transactions/outputs.js";
+import { UTXI, UTXOConsumption, type Input } from "./transactions/inputs.js";
+import { UTXIConsumption, UTXO, type Output } from "./transactions/outputs.js";
 
 /**
  * An atomic, single-position accounting record. Enforces two structural invariants
@@ -52,21 +52,21 @@ export class Transaction {
 
         try {
             for (const input of inputs) {
-                if (input instanceof TXOConsumption) {
-                    if (input.source.calculateAvailable(transactions) < input.quantity) throw new Error(`Attempted to construct a transaction with a TXO consumption object that appears to have been generated incorrectly and attempted to draw from a TXO with an insufficient available balance`);
+                if (input instanceof UTXOConsumption) {
+                    if (input.source.calculateAvailable(transactions) < input.quantity) throw new Error(`Attempted to construct a transaction with a UTXOConsumption that appears to have been generated incorrectly and attempted to draw from a UTXO with an insufficient available balance`);
                 }
 
                 inputsSum += input.quantity;
-                verifyPosition(input instanceof TXI ? input.position : input.source.position);
+                verifyPosition(input instanceof UTXI ? input.position : input.source.position);
             }
 
             for (const output of outputs) {
-                if (output instanceof TXIConsumption) {
-                    if (output.source.calculateAvailable(transactions) < output.quantity) throw new Error(`Attempted to construct a transaction with a TXI consumption object that appears to have been generated incorrectly and attempted to draw from a TXI with an insufficient available balance`);
+                if (output instanceof UTXIConsumption) {
+                    if (output.source.calculateAvailable(transactions) < output.quantity) throw new Error(`Attempted to construct a transaction with a UTXIConsumption that appears to have been generated incorrectly and attempted to draw from a UTXI with an insufficient available balance`);
                 }
 
                 outputsSum += output.quantity;
-                verifyPosition(output instanceof TXO ? output.position : output.source.position);
+                verifyPosition(output instanceof UTXO ? output.position : output.source.position);
             }
         } catch (err: any) { return {ok: false, error: err instanceof Error ? err : new Error(err.toString())}; }
 

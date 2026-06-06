@@ -1,5 +1,5 @@
-import { TXO } from "../transactions/outputs.js";
-import { TXI } from "../transactions/inputs.js";
+import { UTXO } from "../transactions/outputs.js";
+import { UTXI } from "../transactions/inputs.js";
 import type { Transaction } from "../transactions.js";
 
 /**
@@ -7,7 +7,7 @@ import type { Transaction } from "../transactions.js";
  * iterating through `components` in order until `quantity` is fully satisfied.
  * Throws if the available total across all components is less than `quantity`.
  */
-export const fifo = <T extends TXO | TXI>(
+export const fifo = <T extends UTXO | UTXI>(
     components: T[],
     quantity: number,
     transactions: Transaction[]

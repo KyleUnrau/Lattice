@@ -2,13 +2,13 @@ import { clear } from "node:console";
 
 import { dump, runCLI, write } from "./utils.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
-import { TXO, type Output } from "./ledger-kernel/transactions/outputs.js";
-import { TXI, TXOConsumption, type Input } from "./ledger-kernel/transactions/inputs.js";
+import { UTXO, type Output } from "./ledger-kernel/transactions/outputs.js";
+import { UTXI, UTXOConsumption, type Input } from "./ledger-kernel/transactions/inputs.js";
 import { Transaction } from "./ledger-kernel/transactions.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
 import { Account, AccountFolder, ExchangePositionsAccount, ResidualAccount } from "./ledger-kernel/accounts.js";
 import type { Position } from "./ledger-kernel/positions.js";
-import { Exchange, ResidualTXI, ResidualTXO } from "./ledger-kernel/transactions/exchange.js";
+import { Exchange, ResidualUTXI, ResidualUTXO } from "./ledger-kernel/transactions/exchange.js";
 import { BookValueEngine } from "./ledger-kernel/book-value/engine.js";
 import { expense, exchange, type RecaptureResolution, type ExpenseResolution } from "./ledger-kernel/equity-policy.js";
 
@@ -28,10 +28,10 @@ const currentAssets: AccountFolder = assets.addFolder("Current Assets", Orientat
 const netIncome: AccountFolder = netWorth.addFolder("Net Income", Orientation.Positive);
 const expenses: AccountFolder = netIncome.addFolder("Expenses", Orientation.Negative);
 
-const cash: Account = currentAssets.addAccount("Cash", Orientation.Positive, fifo<TXO>, fifo<TXI>);
-const wallet: Account = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<TXO>, fifo<TXI>);
-const openingBalance: Account = netWorth.addAccount("Opening Balance", Orientation.Positive, fifo<TXO>, fifo<TXI>);
-const exchangeExpense: Account = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<TXO>, fifo<TXI>);
+const cash: Account = currentAssets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+const wallet: Account = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+const openingBalance: Account = netWorth.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+const exchangeExpense: Account = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 const capitalGains: ResidualAccount = netIncome.addResidualAccount("Capital Gains (Losses)", Orientation.Positive);
 const exchangePositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Net Transfers In (Out)", Orientation.Positive);
 
@@ -66,7 +66,7 @@ function phase1(): {
     const fromOutputs: Output[] = [
         ...swap.recaptures.map(r => r.from),
         ...(swap.exchange ? [swap.exchange.from] : []),
-        ...(swap.residual instanceof ResidualTXO ? [swap.residual] : []),
+        ...(swap.residual instanceof ResidualUTXO ? [swap.residual] : []),
     ];
     const from: TransactionConstruct = {
         inputs: fromInputs,
@@ -79,7 +79,7 @@ function phase1(): {
     const toInputs: Input[] = [
         ...swap.recaptures.map(r => r.to),
         ...(swap.exchange ? [swap.exchange.to] : []),
-        ...(swap.residual instanceof ResidualTXI ? [swap.residual] : []),
+        ...(swap.residual instanceof ResidualUTXI ? [swap.residual] : []),
     ];
     const toOutputs: Output[] = cash.generateOutputs(cad, 1000, ledger.transactions);
     const to: TransactionConstruct = {
@@ -110,7 +110,7 @@ function phase2(): {
     const fromOutputs: Output[] = [
         ...cadExchange.recaptures.map(r => r.from),
         ...(cadExchange.exchange ? [cadExchange.exchange.from] : []),
-        ...(cadExchange.residual instanceof ResidualTXO ? [cadExchange.residual] : []),
+        ...(cadExchange.residual instanceof ResidualUTXO ? [cadExchange.residual] : []),
         ...expenseRes.recaptureGroups.flatMap(g => g.recaptures.map(r => r.from)),
         ...expenseRes.originAmounts.flatMap(o =>
             exchangeExpense.generateOutputs(o.position, o.quantity, ledger.transactions)),
@@ -134,7 +134,7 @@ function phase2(): {
     const toInputs: Input[] = [
         ...cadExchange.recaptures.map(r => r.to),
         ...(cadExchange.exchange ? [cadExchange.exchange.to] : []),
-        ...(cadExchange.residual instanceof ResidualTXI ? [cadExchange.residual] : []),
+        ...(cadExchange.residual instanceof ResidualUTXI ? [cadExchange.residual] : []),
     ];
     const toOutputs = cash.generateOutputs(usd, 375, ledger.transactions);
     const to: TransactionConstruct = {
@@ -161,7 +161,7 @@ function phase3(): {
     const fromOutputs: Output[] = [
         ...usdExchange.recaptures.map(r => r.from),
         ...(usdExchange.exchange ? [usdExchange.exchange.from] : []),
-        ...(usdExchange.residual instanceof ResidualTXO ? [usdExchange.residual] : []),
+        ...(usdExchange.residual instanceof ResidualUTXO ? [usdExchange.residual] : []),
     ];
     const from: TransactionConstruct = {
         inputs: usdInputs,
@@ -170,11 +170,11 @@ function phase3(): {
     };
 
     // Receiving tx: re-open recapture from-sides, forward exchange to-side, gain residual.
-    // The 50 CAD gain (residualQuantity) lands in capitalGains via ResidualTXI.
+    // The 50 CAD gain (residualQuantity) lands in capitalGains via ResidualUTXI.
     const toInputs: Input[] = [
         ...usdExchange.recaptures.map(r => r.to),
         ...(usdExchange.exchange ? [usdExchange.exchange.to] : []),
-        ...(usdExchange.residual instanceof ResidualTXI ? [usdExchange.residual] : []),
+        ...(usdExchange.residual instanceof ResidualUTXI ? [usdExchange.residual] : []),
     ];
     const toOutputs = cash.generateOutputs(cad, actualProceeds, ledger.transactions);
     const to: TransactionConstruct = {
@@ -213,9 +213,9 @@ runCLI({
     Ledger,
     Orientation,
     Transaction,
-    TXO,
-    TXI,
-    TXOConsumption,
+    UTXO,
+    UTXI,
+    UTXOConsumption,
     Exchange,
     BookValueEngine,
     expense,

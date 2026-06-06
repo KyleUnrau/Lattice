@@ -2,17 +2,17 @@ import type { DisposalMethod } from "./disposal-methods/disposals.js";
 import type { Orientation } from "./ledger.js";
 import type { Position } from "./positions.js";
 import type { Transaction } from "./transactions.js";
-import { TXI, TXOConsumption, type Input } from "./transactions/inputs.js";
-import { TXO, type Output, type TXIConsumption } from "./transactions/outputs.js";
-import { ExchangedTXI, ExchangedTXO, ResidualTXI, ResidualTXO, type Exchange } from "./transactions/exchange.js";
+import { UTXI, UTXOConsumption, type Input } from "./transactions/inputs.js";
+import { UTXO, type Output, type UTXIConsumption } from "./transactions/outputs.js";
+import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI, ResidualUTXO, type Exchange } from "./transactions/exchange.js";
 
 export type AccountNode = Account | AccountFolder | ComputedAccount;
 
 /**
- * Manages per-position {@link AccountEngine}s containing TXO and TXI lots. Implements
+ * Manages per-position {@link AccountEngine}s containing UTXO and UTXI lots. Implements
  * the double-sided ledger entry point: `generateInputs` pulls value out (spending/disposal)
- * by consuming existing TXO lots; `generateOutputs` pushes value in (receipt/income) by
- * settling existing TXI obligations. Both methods use the account's configured
+ * by consuming existing UTXO lots; `generateOutputs` pushes value in (receipt/income) by
+ * settling existing UTXI obligations. Both methods use the account's configured
  * {@link DisposalMethod}s for lot selection.
  */
 export class Account {
@@ -22,8 +22,8 @@ export class Account {
         public name: string,
         public localOrientation: Orientation,
         public parent: AccountFolder | null,
-        public readonly txoDisposalMethod: DisposalMethod<TXO>,
-        public readonly txiDisposalMethod: DisposalMethod<TXI>
+        public readonly utxoDisposalMethod: DisposalMethod<UTXO>,
+        public readonly utxiDisposalMethod: DisposalMethod<UTXI>
     ) { }
 
     public getRootOrientation(): Orientation {
@@ -53,7 +53,7 @@ export class Account {
     }
 
     public getEngine(position: Position): AccountEngine {
-        if (!this.engines.has(position)) this.engines.set(position, new AccountEngine(position, this.txoDisposalMethod, this.txiDisposalMethod));
+        if (!this.engines.has(position)) this.engines.set(position, new AccountEngine(position, this.utxoDisposalMethod, this.utxiDisposalMethod));
         return this.engines.get(position)!;
     }
 
@@ -99,10 +99,10 @@ export class AccountFolder {
     public addAccount(
         name: string,
         localOrientation: Orientation,
-        txoDisposalMethod: DisposalMethod<TXO>,
-        txiDisposalMethod: DisposalMethod<TXI>
+        utxoDisposalMethod: DisposalMethod<UTXO>,
+        utxiDisposalMethod: DisposalMethod<UTXI>
     ): Account {
-        const child = new Account(name, localOrientation, this, txoDisposalMethod, txiDisposalMethod);
+        const child = new Account(name, localOrientation, this, utxoDisposalMethod, utxiDisposalMethod);
         this.addChild(child);
         return child;
     }
@@ -164,75 +164,75 @@ export class AccountFolder {
 }
 
 /**
- * Per-position lot store for a single {@link Account}. Holds the raw {@link TXO} and
- * {@link TXI} lists and implements the generation logic using the account's configured
+ * Per-position lot store for a single {@link Account}. Holds the raw {@link UTXO} and
+ * {@link UTXI} lists and implements the generation logic using the account's configured
  * {@link DisposalMethod}s. Not instantiated directly — created on demand by `Account.getEngine`.
  */
 export class AccountEngine {
-    public readonly txos: TXO[] = [];
-    public readonly txis: TXI[] = [];
+    public readonly utxos: UTXO[] = [];
+    public readonly utxis: UTXI[] = [];
 
     constructor(
         public readonly position: Position,
-        public readonly txoDisposalMethod: DisposalMethod<TXO>,
-        public readonly txiDisposalMethod: DisposalMethod<TXI>
+        public readonly utxoDisposalMethod: DisposalMethod<UTXO>,
+        public readonly utxiDisposalMethod: DisposalMethod<UTXI>
     ) { }
 
     public generateInputs(quantity: number, transactions: Transaction[]): Input[] {
         if (quantity <= 0) throw new Error(`Cannot input a non-positive number from an account`);
 
-        const outputTotal: number = this.txos.reduce((sum, txo) => sum + txo.calculateAvailable(transactions), 0);
+        const outputTotal: number = this.utxos.reduce((sum, utxo) => sum + utxo.calculateAvailable(transactions), 0);
         const consumptionTotal: number = Math.min(outputTotal, quantity);
-        const consumptionAmounts: Map<TXO, number> | null = consumptionTotal !== 0 ? this.txoDisposalMethod(this.txos, consumptionTotal, transactions) : null;
+        const consumptionAmounts: Map<UTXO, number> | null = consumptionTotal !== 0 ? this.utxoDisposalMethod(this.utxos, consumptionTotal, transactions) : null;
 
         let consumptionTotalVerification: number = 0;
-        const consumptions: TXOConsumption[] = consumptionAmounts ? Array.from(consumptionAmounts.entries()).map(
-            ([txo, amount]: [TXO, number]): TXOConsumption => {
+        const consumptions: UTXOConsumption[] = consumptionAmounts ? Array.from(consumptionAmounts.entries()).map(
+            ([utxo, amount]: [UTXO, number]): UTXOConsumption => {
                 consumptionTotalVerification += amount;
-                return txo.consume(amount, transactions);
+                return utxo.consume(amount, transactions);
             }
         ) : [];
 
-        if (consumptionTotalVerification !== consumptionTotal) throw new Error(`The txoDisposalMethod returned a delta with of ${consumptionTotalVerification} which differs from the amount attempting to input of ${consumptionTotal}`);
+        if (consumptionTotalVerification !== consumptionTotal) throw new Error(`The utxoDisposalMethod returned a delta with of ${consumptionTotalVerification} which differs from the amount attempting to input of ${consumptionTotal}`);
 
         const remainder = quantity - consumptionTotal;
         if (remainder > 0) {
-            const txi: TXI = new TXI(remainder, this.position);
-            this.txis.push(txi);
-            return [...consumptions, txi];
+            const utxi: UTXI = new UTXI(remainder, this.position);
+            this.utxis.push(utxi);
+            return [...consumptions, utxi];
         } else return consumptions;
     }
 
     public generateOutputs(quantity: number, transactions: Transaction[]): Output[] {
         if (quantity <= 0) throw new Error(`Cannot output a non-positive number from an account`);
 
-        const inputTotal: number = this.txis.reduce((sum, txi) => sum + txi.calculateAvailable(transactions), 0);
+        const inputTotal: number = this.utxis.reduce((sum, utxi) => sum + utxi.calculateAvailable(transactions), 0);
         const consumptionTotal: number = Math.min(inputTotal, quantity);
-        const consumptionAmounts: Map<TXI, number> | null = consumptionTotal !== 0 ? this.txiDisposalMethod(this.txis, consumptionTotal, transactions) : null;
+        const consumptionAmounts: Map<UTXI, number> | null = consumptionTotal !== 0 ? this.utxiDisposalMethod(this.utxis, consumptionTotal, transactions) : null;
 
         let consumptionTotalVerification: number = 0;
-        const consumptions: TXIConsumption[] = consumptionAmounts ? Array.from(consumptionAmounts.entries()).map(
-            ([txi, amount]: [TXI, number]): TXIConsumption => {
+        const consumptions: UTXIConsumption[] = consumptionAmounts ? Array.from(consumptionAmounts.entries()).map(
+            ([utxi, amount]: [UTXI, number]): UTXIConsumption => {
                 consumptionTotalVerification += amount;
-                return txi.consume(amount, transactions);
+                return utxi.consume(amount, transactions);
             }
         ) : [];
 
-        if (consumptionTotalVerification !== consumptionTotal) throw new Error(`The txiDisposalMethod returned a delta with of ${consumptionTotalVerification} which differs from the amount attempting to output of ${consumptionTotal}`);
+        if (consumptionTotalVerification !== consumptionTotal) throw new Error(`The utxiDisposalMethod returned a delta with of ${consumptionTotalVerification} which differs from the amount attempting to output of ${consumptionTotal}`);
 
         const remainder = quantity - consumptionTotal;
         if (remainder > 0) {
-            const txo: TXO = new TXO(remainder, this.position);
-            this.txos.push(txo);
-            return [...consumptions, txo];
+            const utxo: UTXO = new UTXO(remainder, this.position);
+            this.utxos.push(utxo);
+            return [...consumptions, utxo];
         } else return consumptions;
     }
 
     public getRootBalance(transactions: Transaction[]): number {
         let rootBalance: number = 0;
 
-        for (const txi of this.txis) rootBalance -= txi.calculateAvailable(transactions);
-        for (const txo of this.txos) rootBalance += txo.calculateAvailable(transactions);
+        for (const utxi of this.utxis) rootBalance -= utxi.calculateAvailable(transactions);
+        for (const utxo of this.utxos) rootBalance += utxo.calculateAvailable(transactions);
 
         return rootBalance;
     }
@@ -275,7 +275,7 @@ export abstract class ComputedAccount {
 
 /**
  * Tracks all open exchange positions across the transaction history as an equity account.
- * Scans every {@link ExchangedTXO} (from-side) and {@link ExchangedTXI} (to-side) for their
+ * Scans every {@link ExchangedUTXO} (from-side) and {@link ExchangedUTXI} (to-side) for their
  * remaining availability. Matched exchange pairs at the same locked rate cancel to zero, so
  * only truly unresolved positions carry a balance.
  *
@@ -287,10 +287,10 @@ export class ExchangePositionsAccount extends ComputedAccount {
         let balance = 0;
         for (const tx of transactions) {
             for (const output of tx.outputs)
-                if (output instanceof ExchangedTXO && output.position === position)
+                if (output instanceof ExchangedUTXO && output.position === position)
                     balance += output.calculateAvailable(transactions);
             for (const input of tx.inputs)
-                if (input instanceof ExchangedTXI && input.position === position)
+                if (input instanceof ExchangedUTXI && input.position === position)
                     balance -= input.calculateAvailable(transactions);
         }
         return balance;
@@ -300,9 +300,9 @@ export class ExchangePositionsAccount extends ComputedAccount {
         const positions = new Set<Position>();
         for (const tx of transactions) {
             for (const output of tx.outputs)
-                if (output instanceof ExchangedTXO) positions.add(output.position);
+                if (output instanceof ExchangedUTXO) positions.add(output.position);
             for (const input of tx.inputs)
-                if (input instanceof ExchangedTXI) positions.add(input.position);
+                if (input instanceof ExchangedUTXI) positions.add(input.position);
         }
         const result = new Map<Position, number>();
         for (const position of positions) {
@@ -316,7 +316,7 @@ export class ExchangePositionsAccount extends ComputedAccount {
 /**
  * Tracks recognized gains and losses from exchanges as an equity account. Unlike the scan-based
  * {@link ExchangePositionsAccount}, this account owns its residual lots directly — each
- * {@link ResidualTXI} (gain) and {@link ResidualTXO} (loss) is registered here via
+ * {@link ResidualUTXI} (gain) and {@link ResidualUTXO} (loss) is registered here via
  * {@link addResidualInput} / {@link addResidualOutput}, called by the `exchange()` equity-policy
  * function. Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains", "Profit") can coexist
  * without crosstalk because each owns its own lot lists.
@@ -325,34 +325,34 @@ export class ExchangePositionsAccount extends ComputedAccount {
  * like netIncome); losses increase it.
  */
 export class ResidualAccount extends ComputedAccount {
-    private readonly txis: ResidualTXI[] = [];
-    private readonly txos: ResidualTXO[] = [];
+    private readonly utxis: ResidualUTXI[] = [];
+    private readonly utxos: ResidualUTXO[] = [];
 
-    public addResidualInput(quantity: number, position: Position, exchange: Exchange | null): ResidualTXI {
-        const txi = new ResidualTXI(quantity, position, exchange);
-        this.txis.push(txi);
-        return txi;
+    public addResidualInput(quantity: number, position: Position, exchange: Exchange | null): ResidualUTXI {
+        const utxi = new ResidualUTXI(quantity, position, exchange);
+        this.utxis.push(utxi);
+        return utxi;
     }
 
-    public addResidualOutput(quantity: number, position: Position, exchange: Exchange | null): ResidualTXO {
-        const txo = new ResidualTXO(quantity, position, exchange);
-        this.txos.push(txo);
-        return txo;
+    public addResidualOutput(quantity: number, position: Position, exchange: Exchange | null): ResidualUTXO {
+        const utxo = new ResidualUTXO(quantity, position, exchange);
+        this.utxos.push(utxo);
+        return utxo;
     }
 
     public getRootBalance(position: Position, transactions: Transaction[]): number {
         let balance = 0;
-        for (const txi of this.txis)
-            if (txi.position === position) balance -= txi.calculateAvailable(transactions);
-        for (const txo of this.txos)
-            if (txo.position === position) balance += txo.calculateAvailable(transactions);
+        for (const utxi of this.utxis)
+            if (utxi.position === position) balance -= utxi.calculateAvailable(transactions);
+        for (const utxo of this.utxos)
+            if (utxo.position === position) balance += utxo.calculateAvailable(transactions);
         return balance;
     }
 
     public getRootBalances(transactions: Transaction[]): Map<Position, number> {
         const positions = new Set<Position>([
-            ...this.txis.map(t => t.position),
-            ...this.txos.map(t => t.position),
+            ...this.utxis.map(t => t.position),
+            ...this.utxos.map(t => t.position),
         ]);
         const result = new Map<Position, number>();
         for (const position of positions) {

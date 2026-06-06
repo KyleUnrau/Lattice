@@ -1,12 +1,12 @@
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import { TXI, TXOConsumption } from "./inputs.js";
-import { TXIConsumption, TXO } from "./outputs.js";
+import { UTXI, UTXOConsumption } from "./inputs.js";
+import { UTXIConsumption, UTXO } from "./outputs.js";
 
 /**
  * Links two single-position transactions through a locked conversion rate.
- * `.from` is an {@link ExchangedTXO} placed in the source transaction's outputs (value given away);
- * `.to` is an {@link ExchangedTXI} placed in the destination transaction's inputs (value received).
+ * `.from` is an {@link ExchangedUTXO} placed in the source transaction's outputs (value given away);
+ * `.to` is an {@link ExchangedUTXI} placed in the destination transaction's inputs (value received).
  * The rate is immutable after construction: `from.quantity / to.quantity`.
  *
  * Prefer constructing exchanges via the `exchange()` equity-policy function rather than
@@ -14,21 +14,21 @@ import { TXIConsumption, TXO } from "./outputs.js";
  * and `forwardExchange` is only created when actually needed.
  */
 export class Exchange {
-    public readonly from: ExchangedTXO;
-    public readonly to: ExchangedTXI;
+    public readonly from: ExchangedUTXO;
+    public readonly to: ExchangedUTXI;
 
     constructor(
         from: {quantity: number, position: Position},
         to: {quantity: number, position: Position}
     ) {
-        this.from = new ExchangedTXO(from.quantity, from.position, this);
-        this.to = new ExchangedTXI(to.quantity, to.position, this);
+        this.from = new ExchangedUTXO(from.quantity, from.position, this);
+        this.to = new ExchangedUTXI(to.quantity, to.position, this);
     }
 
     /**
      * Partially or fully unwinds this exchange at its original locked rate.
-     * `recapture.from` is a {@link TXIConsumption} that settles part of `.to`;
-     * `recapture.to` is a {@link TXOConsumption} that reclaims the corresponding part of `.from`.
+     * `recapture.from` is a {@link UTXIConsumption} that settles part of `.to`;
+     * `recapture.to` is a {@link UTXOConsumption} that reclaims the corresponding part of `.from`.
      *
      * @param quantity - Amount of the to-side to recapture; must not exceed remaining availability.
      */
@@ -44,15 +44,15 @@ export class Exchange {
 
 /** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
 export interface ExchangeRecapture {
-    /** {@link TXIConsumption} settling the to-side of the original exchange. Goes in a transaction's outputs. */
-    from: TXIConsumption;
-    /** {@link TXOConsumption} reclaiming the from-side of the original exchange. Goes in a transaction's inputs. */
-    to: TXOConsumption
+    /** {@link UTXIConsumption} settling the to-side of the original exchange. Goes in a transaction's outputs. */
+    from: UTXIConsumption;
+    /** {@link UTXOConsumption} reclaiming the from-side of the original exchange. Goes in a transaction's inputs. */
+    to: UTXOConsumption
 }
 
 /** The from-side of an {@link Exchange} — value given away; placed in a transaction's outputs. */
-export class ExchangedTXO extends TXO {
-    public type = "exchanged-txo";
+export class ExchangedUTXO extends UTXO {
+    public type = "exchanged-utxo";
 
     constructor(
         quantity: number,
@@ -62,8 +62,8 @@ export class ExchangedTXO extends TXO {
 }
 
 /** The to-side of an {@link Exchange} — value received; placed in a transaction's inputs. */
-export class ExchangedTXI extends TXI {
-    public type = "exchanged-txi";
+export class ExchangedUTXI extends UTXI {
+    public type = "exchanged-utxi";
 
     constructor(
         quantity: number,
@@ -80,8 +80,8 @@ export class ExchangedTXI extends TXI {
  * When `exchange` is non-null the basis engine traces lineage through the exchange's from-side.
  * When `exchange` is null (pure-recapture case) the engine treats this as an origin path.
  */
-export class ResidualTXO extends TXO {
-    public type = "residual-txo";
+export class ResidualUTXO extends UTXO {
+    public type = "residual-utxo";
 
     constructor(
         quantity: number,
@@ -98,8 +98,8 @@ export class ResidualTXO extends TXO {
  * When `exchange` is non-null the basis engine traces lineage through the exchange's from-side.
  * When `exchange` is null (pure-recapture case) the engine treats this as an origin path.
  */
-export class ResidualTXI extends TXI {
-    public type = "residual-txi";
+export class ResidualUTXI extends UTXI {
+    public type = "residual-utxi";
 
     constructor(
         quantity: number,
