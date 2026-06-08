@@ -9,25 +9,25 @@ import type { Transaction } from "../transactions.js";
  */
 export const fifo = <T extends UTXO | UTXI>(
     components: T[],
-    quantity: number,
+    quantity: bigint,
     transactions: Transaction[]
-): Map<T, number> => {
-    if (quantity < 0) throw new Error(`Attempted to invoke FIFO disposal method with a negative quantity`);
+): Map<T, bigint> => {
+    if (quantity < 0n) throw new Error(`Attempted to invoke FIFO disposal method with a negative quantity`);
 
-    const result = new Map<T, number>();
+    const result = new Map<T, bigint>();
     let remainingQuantity = quantity;
 
     for (const component of components) {
         const available = component.calculateAvailable(transactions);
 
-        const consume = Math.min(available, remainingQuantity);
+        const consume = available < remainingQuantity ? available : remainingQuantity;
         remainingQuantity -= consume;
-        if (consume > 0) result.set(component, consume);
+        if (consume > 0n) result.set(component, consume);
 
-        if (remainingQuantity <= 0) break;
+        if (remainingQuantity <= 0n) break;
     }
 
-    if (remainingQuantity !== 0) throw new Error(`FIFO disposal method encountered an error, finishing with a remaining quantity of ${remainingQuantity}. Should only be invoked with a quantity delta less than sum of available amounts in components.`);
+    if (remainingQuantity !== 0n) throw new Error(`FIFO disposal method encountered an error, finishing with a remaining quantity of ${remainingQuantity}. Should only be invoked with a quantity delta less than sum of available amounts in components.`);
 
     return result;
 };

@@ -6,7 +6,7 @@ import type { UTXO } from "../transactions/outputs.js";
  * `{ source, quantity }` pair suitable for {@link computeRecaptureResolution}.
  * Non-consumption inputs (exchange inputs, origin UTXIs) are silently ignored.
  */
-export function consumedUTXOsFromInputs(inputs: Input[]): { source: UTXO; quantity: number }[] {
+export function consumedUTXOsFromInputs(inputs: Input[]): { source: UTXO; quantity: bigint }[] {
     return inputs.filter((i): i is UTXOConsumption => i instanceof UTXOConsumption)
         .map(c => ({ source: c.source, quantity: c.quantity }));
 }

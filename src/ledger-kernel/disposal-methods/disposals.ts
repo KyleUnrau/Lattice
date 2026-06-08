@@ -8,4 +8,4 @@ import type { Transaction } from "../transactions.js";
  * `transactions` is required because lot availability is computed dynamically from history,
  * not stored on the lot itself.
  */
-export type DisposalMethod<T extends UTXO | UTXI> = (components: T[], delta: number, transactions: Transaction[]) => Map<T, number>;
+export type DisposalMethod<T extends UTXO | UTXI> = (components: T[], delta: bigint, transactions: Transaction[]) => Map<T, bigint>;

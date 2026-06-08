@@ -11,13 +11,13 @@ export type Output = UTXO | UTXIConsumption;
  */
 export class UTXO {
     public type = "utxo";
-    public quantity: number;
+    public quantity: bigint;
 
     constructor(
-        quantity: number,
+        quantity: bigint,
         public position: Position
     ) {
-        if (quantity < 0) throw new Error("The quantity of a UTXO cannot be less than 0");
+        if (quantity < 0n) throw new Error(`The quantity of a UTXO must be a non-negative integer, got ${quantity}`);
         this.quantity = quantity;
     }
 
@@ -35,10 +35,9 @@ export class UTXO {
     }
 
     /** Remaining quantity not yet consumed by any {@link UTXOConsumption} in the history. */
-    public calculateAvailable(transactions: Transaction[]): number {
-        let available: number = this.quantity;
+    public calculateAvailable(transactions: Transaction[]): bigint {
+        let available: bigint = this.quantity;
         for (const consumption of this.getConsumptions(transactions)) available -= consumption.quantity;
-
         return available;
     }
 
@@ -46,10 +45,10 @@ export class UTXO {
      * Creates a {@link UTXOConsumption} for `quantity` units, asserting the available balance
      * is sufficient. The returned object must be placed in a transaction's inputs.
      */
-    public consume(quantity: number, transactions: Transaction[]): UTXOConsumption {
-        if (quantity < 0) throw new Error(`Attempted to consume a negative number from a UTXO`);
+    public consume(quantity: bigint, transactions: Transaction[]): UTXOConsumption {
+        if (quantity < 0n) throw new Error(`Attempted to consume a negative number from a UTXO`);
 
-        const available: number = this.calculateAvailable(transactions);
+        const available: bigint = this.calculateAvailable(transactions);
         if (quantity > available) throw new Error(`Attempted to consume ${quantity} from a UTXO that only has ${available} remaining.`);
 
         return new UTXOConsumption(quantity, this);
@@ -63,13 +62,13 @@ export class UTXO {
  */
 export class UTXIConsumption {
     public readonly type = "utxi-consumption";
-    public quantity: number;
+    public quantity: bigint;
 
     constructor(
-        quantity: number,
+        quantity: bigint,
         public source: UTXI
     ) {
-        if (quantity < 0) throw new Error("The quantity of a UTXIConsumption cannot be less than 0");
+        if (quantity < 0n) throw new Error(`The quantity of a UTXIConsumption must be a non-negative integer, got ${quantity}`);
         this.quantity = quantity;
     }
 }

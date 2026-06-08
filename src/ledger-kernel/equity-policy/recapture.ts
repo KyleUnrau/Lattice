@@ -1,6 +1,6 @@
 import type { BookValueEngine } from "../book-value/engine.js";
 import type { BasisPath } from "../book-value/types.js";
-import type { Position } from "../positions.js";
+import { scale, type Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
 import type { Exchange } from "../transactions/cross-position.js";
 import type { ExchangeRecapture } from "./exchange.js";
@@ -8,8 +8,8 @@ import type { UTXO } from "../transactions/outputs.js";
 
 export type RecaptureableNode = {
     exchange: Exchange;
-    toQuantity: number;
-    fromQuantity: number;
+    toQuantity: bigint;
+    fromQuantity: bigint;
 };
 
 /**
@@ -43,11 +43,11 @@ export function collectRecaptureableNodes(basis: BasisPath[], targetPosition: Po
  * quantities across all nodes sharing the same exchange. Ensures each exchange is recaptured
  * exactly once even when its lineage appears across multiple consumed UTXOs.
  */
-export function groupRecapturesByExchange(nodes: RecaptureableNode[]): Map<Exchange, { toSideQuantity: number; fromQuantity: number; }> {
-    const grouped = new Map<Exchange, { toSideQuantity: number; fromQuantity: number; }>();
+export function groupRecapturesByExchange(nodes: RecaptureableNode[]): Map<Exchange, { toSideQuantity: bigint; fromQuantity: bigint; }> {
+    const grouped = new Map<Exchange, { toSideQuantity: bigint; fromQuantity: bigint; }>();
 
     for (const node of nodes) {
-        const existing = grouped.get(node.exchange) ?? { toSideQuantity: 0, fromQuantity: 0 };
+        const existing = grouped.get(node.exchange) ?? { toSideQuantity: 0n, fromQuantity: 0n };
         grouped.set(node.exchange, {
             toSideQuantity: existing.toSideQuantity + node.toQuantity,
             fromQuantity: existing.fromQuantity + node.fromQuantity
@@ -60,10 +60,10 @@ export function groupRecapturesByExchange(nodes: RecaptureableNode[]): Map<Excha
 // Internal intermediate shape — not part of the public API.
 type RecaptureComputation = {
     recaptures: ExchangeRecapture[];
-    totalCostBasis: number;
-    residualQuantity: number;
-    newExchangeToQuantity: number;
-    newExchangeFromQuantity: number;
+    totalCostBasis: bigint;
+    residualQuantity: bigint;
+    newExchangeToQuantity: bigint;
+    newExchangeFromQuantity: bigint;
 };
 
 /**
@@ -82,13 +82,13 @@ type RecaptureComputation = {
  * @param transactions - Full transaction history, required to issue recaptures.
  */
 export function computeRecaptureResolution(
-    consumedUTXOs: { source: UTXO; quantity: number; }[],
+    consumedUTXOs: { source: UTXO; quantity: bigint; }[],
     targetPosition: Position,
     totalActualReceived: number,
     engine: BookValueEngine,
     transactions: Transaction[]
 ): RecaptureComputation {
-    const totalConsumed = consumedUTXOs.reduce((sum, c) => sum + c.quantity, 0);
+    const totalConsumed = consumedUTXOs.reduce((sum, c) => sum + c.quantity, 0n);
 
     const allBasis: BasisPath[] = consumedUTXOs.flatMap(({ source, quantity }) => engine.compute(source, quantity));
 
@@ -96,24 +96,25 @@ export function computeRecaptureResolution(
     const grouped = groupRecapturesByExchange(nodes);
 
     const recaptures: ExchangeRecapture[] = [];
-    let totalCostBasis = 0;
-    let totalRecapturedToSide = 0;
+    let totalCostBasis = 0n;
+    let totalRecapturedToSide = 0n;
 
-    for (const [ex, { toSideQuantity, fromQuantity }] of grouped) {
-        recaptures.push(ex.recapture(toSideQuantity, transactions));
-        totalCostBasis += fromQuantity;
+    for (const [ex, { toSideQuantity }] of grouped) {
+        const recapture = ex.recapture(toSideQuantity, transactions);
+        recaptures.push(recapture);
+        totalCostBasis += recapture.to.quantity;
         totalRecapturedToSide += toSideQuantity;
     }
 
-    const totalActualForRecaptured = totalConsumed > 0
-        ? totalActualReceived * (totalRecapturedToSide / totalConsumed)
-        : 0;
+    const totalActualForRecaptured = totalConsumed > 0n
+        ? scale(totalActualReceived, targetPosition) * totalRecapturedToSide / totalConsumed
+        : 0n;
 
     return {
         recaptures,
         totalCostBasis,
         residualQuantity: totalActualForRecaptured - totalCostBasis,
         newExchangeToQuantity: totalConsumed - totalRecapturedToSide,
-        newExchangeFromQuantity: totalActualReceived - totalActualForRecaptured
+        newExchangeFromQuantity: scale(totalActualReceived, targetPosition) - totalActualForRecaptured
     };
 }

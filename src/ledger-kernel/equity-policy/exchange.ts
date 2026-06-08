@@ -36,12 +36,11 @@ export class ExchangeResolution {
         public readonly residual: ResidualUTXI | ResidualUTXO | null
     ) { }
 
-    /** Outputs for the consuming transaction: recapture settlements, forward exchange from-side, and any loss residual. */
+    /** Outputs for the consuming transaction: recapture settlements and forward exchange from-side. */
     getFromOutputs(): Output[] {
         return [
             ...this.recaptures.map(r => r.from),
             ...(this.exchange ? [this.exchange.from] : []),
-            ...(this.residual instanceof ResidualUTXO ? [this.residual] : []),
         ];
     }
 
@@ -52,6 +51,16 @@ export class ExchangeResolution {
             ...(this.exchange ? [this.exchange.to] : []),
             ...(this.residual instanceof ResidualUTXI ? [this.residual] : []),
         ];
+    }
+
+    /**
+     * Outputs for the receiving transaction: a loss residual when actual proceeds fall short of
+     * cost basis. Empty when there is a gain or no residual. Include alongside
+     * `account.generateOutputs(...)` in the receiving transaction — the residual is in
+     * `targetPosition` and belongs on that side of the exchange.
+     */
+    getToOutputs(): Output[] {
+        return this.residual instanceof ResidualUTXO ? [this.residual] : [];
     }
 }
 
@@ -76,7 +85,7 @@ export class ExchangeResolution {
  *
  * @param inputs - Inputs in the source position being exchanged away.
  * @param targetPosition - The position being received (e.g. CAD).
- * @param actualProceeds - Total received in `targetPosition` at the market rate.
+ * @param actualProceeds - Total received in `targetPosition` at the market rate (raw bigint quantity).
  * @param engine - Book value engine for basis tracing.
  * @param transactions - Full transaction history for recaptures.
  * @param residualAccount - The {@link ResidualAccount} to route any recognised gain or loss to.
@@ -97,7 +106,7 @@ export function exchange(
     // Forward exchange only when there are origin amounts (no prior exchange lineage).
     // It covers exactly the origin portion at the actual market rate, creating new
     // suspended cost basis for future recapture.
-    const forwardExchange: Exchange | null = resolution.newExchangeToQuantity > Number.EPSILON
+    const forwardExchange: Exchange | null = resolution.newExchangeToQuantity > 0n
         ? new Exchange(
             { quantity: resolution.newExchangeToQuantity, position: consumedUTXOs[0]!.source.position },
             { quantity: resolution.newExchangeFromQuantity, position: targetPosition }
@@ -108,13 +117,11 @@ export function exchange(
     // Registered directly in residualAccount so it is isolated from other ResidualAccounts.
     // Tagged to the forward exchange for basis tracing when one exists; null in the
     // pure-recapture case (engine treats it as an origin path).
-    const residual: ResidualUTXI | ResidualUTXO | null = Math.abs(resolution.residualQuantity) > Number.EPSILON
-        ? resolution.residualQuantity > 0
+    const residual: ResidualUTXI | ResidualUTXO | null = resolution.residualQuantity !== 0n
+        ? resolution.residualQuantity > 0n
             ? residualAccount.addResidualInput(resolution.residualQuantity, targetPosition, forwardExchange)
             : residualAccount.addResidualOutput(-resolution.residualQuantity, targetPosition, forwardExchange)
         : null;
 
     return new ExchangeResolution(resolution.recaptures, forwardExchange, residual);
-}/** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
-
-
+}

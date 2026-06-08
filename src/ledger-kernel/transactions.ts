@@ -41,8 +41,8 @@ export class Transaction {
     ): Result<Position, Error> {
         if (inputs.length === 0 || outputs.length === 0) throw new Error("Cannot construct a transaction with no inputs or no outputs.");
 
-        let inputsSum: number = 0;
-        let outputsSum: number = 0;
+        let inputsSum: bigint = 0n;
+        let outputsSum: bigint = 0n;
 
         let position: Position | null = null;
         function verifyPosition(instancePosition: Position): void {

@@ -11,7 +11,7 @@ export type BasisPath = OriginPath | ExchangePath | ResidualPath;
  */
 export interface OriginPath {
     readonly type: "origin";
-    readonly quantity: number;
+    readonly quantity: bigint;
     readonly position: Position;
 }
 
@@ -24,8 +24,8 @@ export interface OriginPath {
 export interface ExchangePath {
     readonly type: "exchange";
     readonly exchange: Exchange;
-    readonly quantity: number;
-    readonly fromQuantity: number;
+    readonly quantity: bigint;
+    readonly fromQuantity: bigint;
     readonly basis: BasisPath[];
 }
 
@@ -37,7 +37,7 @@ export interface ExchangePath {
 export interface ResidualPath {
     readonly type: "residual";
     readonly exchange: Exchange;
-    readonly quantity: number;
-    readonly fromQuantity: number;
+    readonly quantity: bigint;
+    readonly fromQuantity: bigint;
     readonly basis: BasisPath[];
 }

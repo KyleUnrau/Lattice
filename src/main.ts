@@ -1,6 +1,8 @@
 import { clear } from "node:console";
 
-import { dump, runCLI, write } from "./utils.js";
+import { dump, muldiv, runCLI, write } from "./utils.js";
+import { formatQuantity } from "./ledger-kernel/positions.js";
+import { scale, unscale } from "./ledger-kernel/positions.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
 import { UTXO, type Output } from "./ledger-kernel/transactions/outputs.js";
 import { UTXI, UTXOConsumption, type Input } from "./ledger-kernel/transactions/inputs.js";
@@ -15,10 +17,10 @@ import { expense, ExpenseResolution } from "./ledger-kernel/equity-policy/expens
 import { computeRecaptureResolution, groupRecapturesByExchange } from "./ledger-kernel/equity-policy/recapture.js";
 import { consumedUTXOsFromInputs } from "./ledger-kernel/equity-policy/utils.js";
 
-// Positions
-const btc: Position = { name: "Bitcoin" };
-const cad: Position = { name: "Canadian Dollars" };
-const usd: Position = { name: "United States Dollars" };
+// Positions (quantities stored in smallest tradable unit)
+const btc: Position = { name: "Bitcoin", decimals: 8 };           // 1 BTC = 100_000_000 sat
+const cad: Position = { name: "Canadian Dollars", decimals: 2 };  // 1 CAD = 100 cents
+const usd: Position = { name: "United States Dollars", decimals: 2 }; // 1 USD = 100 cents
 
 // Chart of accounts
 const netAssets: AccountFolder = new AccountFolder("Net Assets", Orientation.Positive);
@@ -64,16 +66,15 @@ function phase1(): {
 } {
     const fromInputs = wallet.generateInputs(btc, 0.01, ledger.transactions);
     const swap = exchange(fromInputs, cad, 1000, engine, ledger.transactions, capitalGains);
-
     const fromOutputs: Output[] = swap.getFromOutputs();
+    const toInputs: Input[] = swap.getToInputs();
+    const toOutputs: Output[] = [...cash.generateOutputs(cad, 1000, ledger.transactions), ...swap.getToOutputs()];
+
     const from: TransactionConstruct = {
         inputs: fromInputs,
         outputs: fromOutputs,
         transaction: ledger.newTransaction(fromInputs, fromOutputs),
     };
-
-    const toInputs: Input[] = swap.getToInputs();
-    const toOutputs: Output[] = cash.generateOutputs(cad, 1000, ledger.transactions);
     const to: TransactionConstruct = {
         inputs: toInputs,
         outputs: toOutputs,
@@ -93,26 +94,23 @@ function phase2(): {
 } {
     const exchangeInputs = cash.generateInputs(cad, 500, ledger.transactions);
     const expenseInputs  = cash.generateInputs(cad, 25,  ledger.transactions);
-
     const cadExchange = exchange(exchangeInputs, usd, 375, engine, ledger.transactions, capitalGains);
     const expenseRes  = expense(expenseInputs, engine, ledger.transactions);
 
+    const fromInputs = [...exchangeInputs, ...expenseInputs];
     const fromOutputs: Output[] = [
         ...cadExchange.getFromOutputs(),
         ...expenseRes.getFromOutputs(exchangeExpense, ledger.transactions),
     ];
-    const fromInputs = [...exchangeInputs, ...expenseInputs];
+    const toInputs: Input[] = cadExchange.getToInputs();
+    const toOutputs = [...cash.generateOutputs(usd, 375, ledger.transactions), ...cadExchange.getToOutputs()];
+
     const from: TransactionConstruct = {
         inputs: fromInputs,
         outputs: fromOutputs,
         transaction: ledger.newTransaction(fromInputs, fromOutputs),
     };
-
     const expenseTransactions = expenseRes.createTransactions(exchangeExpense, ledger);
-
-    // Receiving tx: re-open exchange recapture from-sides, forward exchange to-side, gain residual.
-    const toInputs: Input[] = cadExchange.getToInputs();
-    const toOutputs = cash.generateOutputs(usd, 375, ledger.transactions);
     const to: TransactionConstruct = {
         inputs: toInputs,
         outputs: toOutputs,
@@ -123,28 +121,26 @@ function phase2(): {
 }
 
 // ─── Phase #3: Exchange 375 USD → 550 CAD (50 CAD capital gain) ──────────────
-function phase3(): {
+function phase3(proceeds: number): {
     from: TransactionConstruct,
     to: TransactionConstruct,
     usdExchange: ExchangeResolution
 } {
-    const actualProceeds = 550;
     const usdInputs = cash.generateInputs(usd, 375, ledger.transactions);
-    const usdExchange = exchange(usdInputs, cad, actualProceeds, engine, ledger.transactions, capitalGains);
-
+    const usdExchange = exchange(usdInputs, cad, proceeds, engine, ledger.transactions, capitalGains);
     // Consuming tx: close recaptured prior exchanges, then open the forward exchange (if any).
     // For phase3 the full 375 USD traces to cadExchange, so exchange is null — recaptures only.
     const fromOutputs: Output[] = usdExchange.getFromOutputs();
+    // Receiving tx: re-open recapture from-sides, forward exchange to-side, gain residual.
+    // The 50 CAD gain lands in capitalGains as a ResidualUTXI.
+    const toInputs: Input[] = usdExchange.getToInputs();
+    const toOutputs = [...cash.generateOutputs(cad, proceeds, ledger.transactions), ...usdExchange.getToOutputs()];
+
     const from: TransactionConstruct = {
         inputs: usdInputs,
         outputs: fromOutputs,
         transaction: ledger.newTransaction(usdInputs, fromOutputs),
     };
-
-    // Receiving tx: re-open recapture from-sides, forward exchange to-side, gain residual.
-    // The 50 CAD gain lands in capitalGains as a ResidualUTXI.
-    const toInputs: Input[] = usdExchange.getToInputs();
-    const toOutputs = cash.generateOutputs(cad, actualProceeds, ledger.transactions);
     const to: TransactionConstruct = {
         inputs: toInputs,
         outputs: toOutputs,
@@ -152,6 +148,35 @@ function phase3(): {
     };
 
     return { from, to, usdExchange };
+}
+
+// ─── Phase #4: Exchange full CAD cash balance → BTC at 900,000 CAD/BTC ──────
+function phase4(): {
+    from: TransactionConstruct,
+    to: TransactionConstruct,
+    cadExchange: ExchangeResolution
+} {
+    const cadBalance = cash.getBalance(cad, ledger.transactions);
+    // 900,000 CAD/BTC = 90,000,000 cents per 100,000,000 sat
+    const btcProceeds = cadBalance / 900_000;
+    const cadInputs = cash.generateInputs(cad, cadBalance, ledger.transactions);
+    const cadExchange = exchange(cadInputs, btc, btcProceeds, engine, ledger.transactions, capitalGains);
+    const fromOutputs: Output[] = cadExchange.getFromOutputs();
+    const toInputs: Input[] = cadExchange.getToInputs();
+    const toOutputs = [...wallet.generateOutputs(btc, btcProceeds, ledger.transactions), ...cadExchange.getToOutputs()];
+
+    const from: TransactionConstruct = {
+        inputs: cadInputs,
+        outputs: fromOutputs,
+        transaction: ledger.newTransaction(cadInputs, fromOutputs),
+    };
+    const to: TransactionConstruct = {
+        inputs: toInputs,
+        outputs: toOutputs,
+        transaction: ledger.newTransaction(toInputs, toOutputs),
+    };
+
+    return { from, to, cadExchange };
 }
 
 runCLI({
@@ -188,6 +213,10 @@ runCLI({
     BookValueEngine,
     expense,
     exchange,
+    muldiv,
+    scale,
+    unscale,
+    formatQuantity,
     consumedUTXOsFromInputs,
     computeRecaptureResolution,
     groupRecapturesByExchange,
@@ -195,5 +224,6 @@ runCLI({
     phase0,
     phase1,
     phase2,
-    phase3
+    phase3,
+    phase4
 });

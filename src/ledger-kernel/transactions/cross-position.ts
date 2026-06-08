@@ -19,8 +19,8 @@ export class Exchange {
     public readonly to: ExchangedUTXI;
 
     constructor(
-        from: {quantity: number, position: Position},
-        to: {quantity: number, position: Position}
+        from: {quantity: bigint, position: Position},
+        to: {quantity: bigint, position: Position}
     ) {
         this.from = new ExchangedUTXO(from.quantity, from.position, this);
         this.to = new ExchangedUTXI(to.quantity, to.position, this);
@@ -33,8 +33,8 @@ export class Exchange {
      *
      * @param quantity - Amount of the to-side to recapture; must not exceed remaining availability.
      */
-    public recapture(quantity: number, transactions: Transaction[]): ExchangeRecapture {
-        const toQuantity: number = (this.from.quantity / this.to.quantity) * quantity;
+    public recapture(quantity: bigint, transactions: Transaction[]): ExchangeRecapture {
+        const toQuantity: bigint = this.from.quantity * quantity / this.to.quantity;
 
         return {
             from: this.to.consume(quantity, transactions),
@@ -48,7 +48,7 @@ export class ExchangedUTXO extends UTXO {
     public type = "exchanged-utxo";
 
     constructor(
-        quantity: number,
+        quantity: bigint,
         position: Position,
         public readonly exchange: Exchange
     ) { super(quantity, position); }
@@ -59,7 +59,7 @@ export class ExchangedUTXI extends UTXI {
     public type = "exchanged-utxi";
 
     constructor(
-        quantity: number,
+        quantity: bigint,
         position: Position,
         public readonly exchange: Exchange
     ) { super(quantity, position); }
@@ -77,7 +77,7 @@ export class ResidualUTXO extends UTXO {
     public type = "residual-utxo";
 
     constructor(
-        quantity: number,
+        quantity: bigint,
         position: Position,
         public readonly exchange: Exchange | null
     ) { super(quantity, position); }
@@ -95,10 +95,8 @@ export class ResidualUTXI extends UTXI {
     public type = "residual-utxi";
 
     constructor(
-        quantity: number,
+        quantity: bigint,
         position: Position,
         public readonly exchange: Exchange | null
     ) { super(quantity, position); }
 }
-
-

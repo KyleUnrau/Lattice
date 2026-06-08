@@ -55,3 +55,13 @@ export function dump(value: any): string {
 export function write(value: any): void {
     fs.writeFileSync("output.txt", Buffer.from(dump(value), "utf8"));
 }
+
+/**
+ * Integer multiply-then-divide: computes `floor(a * b / c)` using BigInt arithmetic
+ * to avoid floating-point rounding. Use wherever a rate or proportional split would
+ * otherwise produce a non-integer intermediate result.
+ */
+export function muldiv(a: number, b: number, c: number): number {
+    return Number(BigInt(a) * BigInt(b) / BigInt(c));
+}
+

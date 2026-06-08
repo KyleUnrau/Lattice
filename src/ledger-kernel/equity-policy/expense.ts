@@ -20,7 +20,7 @@ import { consumedUTXOsFromInputs } from "./utils.js";
 export type ExpenseRecaptureGroup = {
     position: Position;
     recaptures: ExchangeRecapture[];
-    totalQuantity: number;
+    totalQuantity: bigint;
 };
 
 /**
@@ -37,7 +37,7 @@ export type ExpenseRecaptureGroup = {
 export class ExpenseResolution {
     constructor(
         public readonly recaptureGroups: ExpenseRecaptureGroup[],
-        public readonly originAmounts: Array<{ position: Position; quantity: number }>,
+        public readonly originAmounts: Array<{ position: Position; quantity: bigint }>,
     ) {}
 
     /**
@@ -48,7 +48,7 @@ export class ExpenseResolution {
     getFromOutputs(account: Account, transactions: Transaction[]): Output[] {
         return [
             ...this.recaptureGroups.flatMap(g => g.recaptures.map(r => r.from)),
-            ...this.originAmounts.flatMap(o => account.generateOutputs(o.position, o.quantity, transactions)),
+            ...this.originAmounts.flatMap(o => account.getEngine(o.position).generateOutputsRaw(o.quantity, transactions)),
         ];
     }
 
@@ -60,7 +60,7 @@ export class ExpenseResolution {
     getExpenseEntries(account: Account, transactions: Transaction[]): { inputs: Input[]; outputs: Output[] }[] {
         return this.recaptureGroups.map(group => ({
             inputs: group.recaptures.map(r => r.to),
-            outputs: account.generateOutputs(group.position, group.totalQuantity, transactions),
+            outputs: account.getEngine(group.position).generateOutputsRaw(group.totalQuantity, transactions),
         }));
     }
 
@@ -97,13 +97,13 @@ export function expense(
     const allBasis = consumedUTXOs.flatMap(c => engine.compute(c.source, c.quantity));
 
     const exchangeNodes: RecaptureableNode[] = [];
-    const originTotals = new Map<Position, number>();
+    const originTotals = new Map<Position, bigint>();
 
     for (const path of allBasis) {
         if (path.type === "exchange" || path.type === "residual") {
             exchangeNodes.push({ exchange: path.exchange, toQuantity: path.quantity, fromQuantity: path.fromQuantity });
         } else if (path.type === "origin") {
-            originTotals.set(path.position, (originTotals.get(path.position) ?? 0) + path.quantity);
+            originTotals.set(path.position, (originTotals.get(path.position) ?? 0n) + path.quantity);
         }
     }
 
@@ -113,7 +113,7 @@ export function expense(
     for (const [ex, { toSideQuantity, fromQuantity }] of grouped) {
         const pos = ex.from.position;
         const recapture = ex.recapture(toSideQuantity, transactions);
-        const existing = byPosition.get(pos) ?? { position: pos, recaptures: [], totalQuantity: 0 };
+        const existing = byPosition.get(pos) ?? { position: pos, recaptures: [], totalQuantity: 0n };
         byPosition.set(pos, {
             position: pos,
             recaptures: [...existing.recaptures, recapture],

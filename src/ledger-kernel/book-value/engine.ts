@@ -22,8 +22,8 @@ export class BookValueEngine {
      * @param utxo - The output whose basis is being traced.
      * @param quantity - Portion of `utxo` to trace; must be positive and ≤ `utxo.quantity`.
      */
-    public compute(utxo: UTXO, quantity: number): BasisPath[] {
-        if (quantity <= 0) throw new Error(`quantity must be positive, got ${quantity}`);
+    public compute(utxo: UTXO, quantity: bigint): BasisPath[] {
+        if (quantity <= 0n) throw new Error(`quantity must be positive, got ${quantity}`);
         if (quantity > utxo.quantity) throw new Error(`quantity ${quantity} exceeds utxo.quantity ${utxo.quantity}`);
         return this.traceUTXO(utxo, quantity, new Set<UTXO>());
     }
@@ -33,7 +33,7 @@ export class BookValueEngine {
      * to each of its inputs by the fraction `quantity / totalOutputQty`, then recurses
      * via {@link traceInput}.
      */
-    private traceUTXO(utxo: UTXO, quantity: number, visited: Set<UTXO> = new Set()): BasisPath[] {
+    private traceUTXO(utxo: UTXO, quantity: bigint, visited: Set<UTXO> = new Set()): BasisPath[] {
         if (visited.has(utxo)) throw new Error(`Cycle detected: UTXO encountered twice in traversal path`);
 
         const nextVisited = new Set(visited);
@@ -42,13 +42,12 @@ export class BookValueEngine {
         const producingTx = this.findProducingTransaction(utxo);
         if (!producingTx) throw new Error(`UTXO has no producing transaction — ledger invariant violated`);
 
-        const totalOutputQty = producingTx.outputs.reduce((sum, out) => sum + out.quantity, 0);
-        const inputFraction = quantity / totalOutputQty;
+        const totalOutputQty = producingTx.outputs.reduce((sum, out) => sum + out.quantity, 0n);
 
         const result: BasisPath[] = [];
         for (const input of producingTx.inputs) {
-            const attributedQty = input.quantity * inputFraction;
-            if (attributedQty < Number.EPSILON) continue;
+            const attributedQty = input.quantity * quantity / totalOutputQty;
+            if (attributedQty === 0n) continue;
             result.push(...this.traceInput(input, attributedQty, nextVisited));
         }
         return result;
@@ -61,14 +60,14 @@ export class BookValueEngine {
      * - {@link ResidualUTXI} — emits a {@link ResidualPath} and recurses into the exchange's from-side
      * - {@link UTXI} — emits an {@link OriginPath}, terminating the branch
      */
-    private traceInput(input: Input, quantity: number, visited: Set<UTXO> = new Set()): BasisPath[] {
+    private traceInput(input: Input, quantity: bigint, visited: Set<UTXO> = new Set()): BasisPath[] {
         if (input instanceof UTXOConsumption) {
             return this.traceUTXO(input.source, quantity, visited);
         }
 
         if (input instanceof ExchangedUTXI) {
             const ex = input.exchange;
-            const fromQty = quantity * (ex.from.quantity / ex.to.quantity);
+            const fromQty = quantity * ex.from.quantity / ex.to.quantity;
             const basis = this.traceUTXO(ex.from, fromQty, visited);
             return [{ type: "exchange", exchange: ex, quantity, fromQuantity: fromQty, basis } satisfies ExchangePath];
         }
@@ -80,7 +79,7 @@ export class BookValueEngine {
                 return [{ type: "origin", quantity, position: input.position } satisfies OriginPath];
             }
             const ex = input.exchange;
-            const fromQty = quantity * (ex.from.quantity / ex.to.quantity);
+            const fromQty = quantity * ex.from.quantity / ex.to.quantity;
             const basis = this.traceUTXO(ex.from, fromQty, visited);
             return [{ type: "residual", exchange: ex, quantity, fromQuantity: fromQty, basis } satisfies ResidualPath];
         }
