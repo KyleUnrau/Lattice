@@ -66,12 +66,14 @@ export class ExchangedUTXI extends UTXI {
 }
 
 /**
- * A loss (shortfall) relative to an exchange's locked rate, tagged to its originating exchange.
+ * A loss (shortfall) relative to an exchange's locked rate, recognized in the surface position.
  * Placed in a transaction's outputs. Ownership (which {@link ResidualAccount} this belongs to) is
  * tracked by the account itself, not by this primitive.
  *
- * When `exchange` is non-null the basis engine traces lineage through the exchange's from-side.
- * When `exchange` is null (pure-recapture case) the engine treats this as an origin path.
+ * `originBasis` records the origin-position composition (e.g. `{BTC: 0.0005}`) that this residual's
+ * surface amount traces back to — the deferred equity it carries until settlement. The basis engine
+ * surfaces this directly as a {@link ResidualPath} so consumers can settle the residual into its
+ * origin positions.
  */
 export class ResidualUTXO extends UTXO {
     public type = "residual-utxo";
@@ -79,17 +81,19 @@ export class ResidualUTXO extends UTXO {
     constructor(
         quantity: bigint,
         position: Position,
-        public readonly exchange: Exchange | null
+        public readonly originBasis: Map<Position, bigint>
     ) { super(quantity, position); }
 }
 
 /**
- * A gain (surplus) relative to an exchange's locked rate, tagged to its originating exchange.
+ * A gain (surplus) relative to an exchange's locked rate, recognized in the surface position.
  * Placed in a transaction's inputs. Ownership (which {@link ResidualAccount} this belongs to) is
  * tracked by the account itself, not by this primitive.
  *
- * When `exchange` is non-null the basis engine traces lineage through the exchange's from-side.
- * When `exchange` is null (pure-recapture case) the engine treats this as an origin path.
+ * `originBasis` records the origin-position composition (e.g. `{BTC: 0.0005}`) that this residual's
+ * surface amount traces back to — the deferred equity it carries until settlement. The basis engine
+ * surfaces this directly as a {@link ResidualPath} so consumers can settle the residual into its
+ * origin positions.
  */
 export class ResidualUTXI extends UTXI {
     public type = "residual-utxi";
@@ -97,6 +101,6 @@ export class ResidualUTXI extends UTXI {
     constructor(
         quantity: bigint,
         position: Position,
-        public readonly exchange: Exchange | null
+        public readonly originBasis: Map<Position, bigint>
     ) { super(quantity, position); }
 }

@@ -1,4 +1,4 @@
-import type { Exchange } from "../transactions/cross-position.js";
+import type { Exchange, ResidualUTXI } from "../transactions/cross-position.js";
 import type { Position } from "../positions.js";
 import type { BookValueEngine } from "./engine.js";
 
@@ -30,14 +30,15 @@ export interface ExchangePath {
 }
 
 /**
- * Residual node — the basis trace crossed a {@link ResidualUTXI} (a gain tagged to an exchange).
- * Same shape as {@link ExchangePath} but signals that the value originated as a recognized
- * gain above the exchange's locked rate rather than as a direct exchange receipt.
+ * Residual node — the basis trace crossed a {@link ResidualUTXI} (deferred residual equity).
+ * `quantity` is the surface-position amount attributed to this node; `originBasis` is the
+ * proportional origin-position composition that amount carries, and `residual` references the
+ * lot itself so a consumer can settle (partially close) it. Terminal: a residual does not recurse
+ * further — its lineage is captured by `originBasis`.
  */
 export interface ResidualPath {
     readonly type: "residual";
-    readonly exchange: Exchange;
+    readonly residual: ResidualUTXI;
     readonly quantity: bigint;
-    readonly fromQuantity: bigint;
-    readonly basis: BasisPath[];
+    readonly originBasis: Map<Position, bigint>;
 }

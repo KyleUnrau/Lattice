@@ -4,7 +4,7 @@ import type { Position } from "./positions.js";
 import type { Transaction } from "./transactions.js";
 import { UTXI, UTXOConsumption, type Input } from "./transactions/inputs.js";
 import { UTXO, type Output, type UTXIConsumption } from "./transactions/outputs.js";
-import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI, ResidualUTXO, type Exchange } from "./transactions/cross-position.js";
+import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI, ResidualUTXO } from "./transactions/cross-position.js";
 import { scale, unscale } from "./positions.js";
 
 /**
@@ -320,14 +320,14 @@ export class ResidualAccount extends ComputedAccount {
     private readonly utxis: ResidualUTXI[] = [];
     private readonly utxos: ResidualUTXO[] = [];
 
-    public addResidualInput(quantity: bigint, position: Position, exchange: Exchange | null): ResidualUTXI {
-        const utxi = new ResidualUTXI(quantity, position, exchange);
+    public addResidualInput(quantity: bigint, position: Position, originBasis: Map<Position, bigint>): ResidualUTXI {
+        const utxi = new ResidualUTXI(quantity, position, originBasis);
         this.utxis.push(utxi);
         return utxi;
     }
 
-    public addResidualOutput(quantity: bigint, position: Position, exchange: Exchange | null): ResidualUTXO {
-        const utxo = new ResidualUTXO(quantity, position, exchange);
+    public addResidualOutput(quantity: bigint, position: Position, originBasis: Map<Position, bigint>): ResidualUTXO {
+        const utxo = new ResidualUTXO(quantity, position, originBasis);
         this.utxos.push(utxo);
         return utxo;
     }

@@ -2,6 +2,7 @@ import { ExchangedUTXI, ResidualUTXI } from "../transactions/cross-position.js";
 import { UTXI, UTXOConsumption, type Input } from "../transactions/inputs.js";
 import { UTXO } from "../transactions/outputs.js";
 import type { Transaction } from "../transactions.js";
+import type { Position } from "../positions.js";
 import type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";
 
 export type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";
@@ -73,15 +74,13 @@ export class BookValueEngine {
         }
 
         if (input instanceof ResidualUTXI) {
-            if (input.exchange === null) {
-                // Pure-recapture residual: no forward exchange was created, so no further
-                // lineage can be traced. Treat as origin in the current position.
-                return [{ type: "origin", quantity, position: input.position } satisfies OriginPath];
-            }
-            const ex = input.exchange;
-            const fromQty = quantity * ex.from.quantity / ex.to.quantity;
-            const basis = this.traceUTXO(ex.from, fromQty, visited);
-            return [{ type: "residual", exchange: ex, quantity, fromQuantity: fromQty, basis } satisfies ResidualPath];
+            // Deferred residual equity: surface as a residual node carrying the proportional
+            // origin-position basis for the traced quantity. Terminal — the lineage is the
+            // recorded originBasis, not a deeper graph walk.
+            const originBasis = new Map<Position, bigint>();
+            for (const [position, basisQty] of input.originBasis)
+                originBasis.set(position, basisQty * quantity / input.quantity);
+            return [{ type: "residual", residual: input, quantity, originBasis } satisfies ResidualPath];
         }
 
         if (input instanceof UTXI) {

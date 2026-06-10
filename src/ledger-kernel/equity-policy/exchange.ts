@@ -6,6 +6,7 @@ import { Exchange, ResidualUTXI, ResidualUTXO } from "../transactions/cross-posi
 import type { Input, UTXOConsumption } from "../transactions/inputs.js";
 import type { Output, UTXIConsumption } from "../transactions/outputs.js";
 import { computeRecaptureResolution } from "./recapture.js";
+import { settleLossIntoOrigin } from "./settlement.js";
 import { consumedUTXOsFromInputs } from "./utils.js";
 
 /** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
@@ -23,8 +24,9 @@ export interface ExchangeRecapture {
  * - `exchange` — forward exchange at the actual proceeds rate, covering only origin-portion inputs.
  *   Non-null only when inputs with no prior exchange lineage exist; null when all inputs were fully
  *   recaptured from prior exchanges.
- * - `residual` — {@link ResidualUTXI} for a gain, {@link ResidualUTXO} for a loss, or `null` when
- *   actual proceeds exactly equal cost basis.
+ * - `residuals` — the open gain residual ({@link ResidualUTXI}) recognized in `targetPosition`,
+ *   carrying its origin-position basis. A **loss** is not left here: it is settled immediately into
+ *   its origin positions (see `getToOutputs` / `getResidualSettlements`).
  *
  * Use {@link ExchangeResolution.getFromOutputs} and {@link ExchangeResolution.getToInputs} to build
  * the transaction entry arrays rather than constructing them manually.
@@ -33,34 +35,52 @@ export class ExchangeResolution {
     constructor(
         public readonly recaptures: ExchangeRecapture[],
         public readonly exchange: Exchange | null,
-        public readonly residual: ResidualUTXI | ResidualUTXO | null
+        public readonly residuals: (ResidualUTXI | ResidualUTXO)[],
+        /** Origin-exchange settlements (surface position) for an immediately-settled loss residual. */
+        public readonly residualSurfaceOutputs: Output[] = [],
+        /** Standalone origin-position transactions recognizing a settled loss; commit via the caller. */
+        public readonly residualSettlements: { inputs: Input[]; outputs: Output[]; }[] = [],
+        /** Settlements closing the residual legs of residual-derived value being consumed (surface position). */
+        public readonly residualCloseOutputs: Output[] = [],
+        /** Destination-position gains minted when settling consumed residual-derived value. */
+        public readonly residualMintInputs: Input[] = []
     ) { }
 
-    /** Outputs for the consuming transaction: recapture settlements and forward exchange from-side. */
+    /** Outputs for the consuming transaction: recapture settlements, forward from-side, and closed residual legs. */
     getFromOutputs(): Output[] {
         return [
             ...this.recaptures.map(r => r.from),
             ...(this.exchange ? [this.exchange.from] : []),
+            ...this.residualCloseOutputs,
         ];
     }
 
-    /** Inputs for the receiving transaction: recapture reclaims, forward exchange to-side, and any gain residual. */
+    /** Inputs for the receiving transaction: recapture reclaims, forward to-side, gain residuals, and settled-residual mints. */
     getToInputs(): Input[] {
         return [
             ...this.recaptures.map(r => r.to),
             ...(this.exchange ? [this.exchange.to] : []),
-            ...(this.residual instanceof ResidualUTXI ? [this.residual] : []),
+            ...this.residuals.filter((r): r is ResidualUTXI => r instanceof ResidualUTXI),
+            ...this.residualMintInputs,
         ];
     }
 
     /**
-     * Outputs for the receiving transaction: a loss residual when actual proceeds fall short of
-     * cost basis. Empty when there is a gain or no residual. Include alongside
-     * `account.generateOutputs(...)` in the receiving transaction — the residual is in
-     * `targetPosition` and belongs on that side of the exchange.
+     * Outputs for the receiving transaction: when actual proceeds fall short of cost basis the loss
+     * is settled into its origin position(s), and these settle the origin exchanges' to-sides in
+     * `targetPosition`. Include alongside `account.generateOutputs(...)` in the receiving transaction.
      */
     getToOutputs(): Output[] {
-        return this.residual instanceof ResidualUTXO ? [this.residual] : [];
+        return this.residualSurfaceOutputs;
+    }
+
+    /**
+     * Standalone single-position transactions that recognize a settled loss in its origin
+     * position(s). Commit each via `ledger.newTransaction(inputs, outputs)` after the receiving
+     * transaction. Empty unless a loss residual was settled.
+     */
+    getResidualSettlements(): { inputs: Input[]; outputs: Output[]; }[] {
+        return this.residualSettlements;
     }
 }
 
@@ -113,15 +133,49 @@ export function exchange(
         )
         : null;
 
-    // Residual represents the gain or loss on the recaptured portion only.
-    // Registered directly in residualAccount so it is isolated from other ResidualAccounts.
-    // Tagged to the forward exchange for basis tracing when one exists; null in the
-    // pure-recapture case (engine treats it as an origin path).
-    const residual: ResidualUTXI | ResidualUTXO | null = resolution.residualQuantity !== 0n
-        ? resolution.residualQuantity > 0n
-            ? residualAccount.addResidualInput(resolution.residualQuantity, targetPosition, forwardExchange)
-            : residualAccount.addResidualOutput(-resolution.residualQuantity, targetPosition, forwardExchange)
-        : null;
+    // A gain is recognized in the surface (target) position as an open residual carrying the
+    // origin-position basis it traces back to (e.g. 50 CAD gain carrying {BTC: 0.0005}); it stays
+    // deferred until the surface value is later consumed and settled. A loss is NOT left in the
+    // surface position — it is settled immediately into its origin positions, expense-style.
+    const residuals: (ResidualUTXI | ResidualUTXO)[] = [];
+    let residualSurfaceOutputs: Output[] = [];
+    let residualSettlements: { inputs: Input[]; outputs: Output[]; }[] = [];
 
-    return new ExchangeResolution(resolution.recaptures, forwardExchange, residual);
+    if (resolution.residualQuantity > 0n) {
+        residuals.push(residualAccount.addResidualInput(resolution.residualQuantity, targetPosition, resolution.residualOriginBasis));
+    } else if (resolution.residualQuantity < 0n) {
+        const principal = resolution.recaptures.map(r => ({ from: r.to.source, fromQuantity: r.to.quantity }));
+        const settled = settleLossIntoOrigin(
+            -resolution.residualQuantity, principal, resolution.totalCostBasis, residualAccount, engine, transactions
+        );
+        residualSurfaceOutputs = settled.surfaceOutputs;
+        residualSettlements = settled.recognitions;
+    }
+
+    // Settle any residual-derived value among the consumed inputs: close each open residual leg
+    // (surface position) and recognize its destination-position proceeds as a new gain, rather than
+    // forward-exchanging it as origin value. This re-denominates the deferred equity into the
+    // destination position when the residual value closes the loop.
+    const residualCloseOutputs: Output[] = [];
+    const residualMintInputs: Input[] = [];
+    if (resolution.residualNodes.length > 0) {
+        const totalResidual = resolution.residualNodes.reduce((sum, n) => sum + n.quantity, 0n);
+        let allocated = 0n;
+        for (let i = 0; i < resolution.residualNodes.length; i++) {
+            const node = resolution.residualNodes[i]!;
+            residualCloseOutputs.push(node.residual.consume(node.quantity, transactions));
+
+            const share = i === resolution.residualNodes.length - 1
+                ? resolution.residualDerivedProceeds - allocated
+                : resolution.residualDerivedProceeds * node.quantity / totalResidual;
+            allocated += share;
+            if (share > 0n)
+                residualMintInputs.push(residualAccount.addResidualInput(share, targetPosition, new Map([[targetPosition, share]])));
+        }
+    }
+
+    return new ExchangeResolution(
+        resolution.recaptures, forwardExchange, residuals,
+        residualSurfaceOutputs, residualSettlements, residualCloseOutputs, residualMintInputs
+    );
 }
