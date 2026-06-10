@@ -8,6 +8,7 @@
   "main": "dist/main.js",
   "scripts": {
     "start": "node --inspect dist/main.js",
+    "build": "tsc",
     "write-git-changes": "git --no-pager diff --cached > git-changes.txt" 
   },
   "devDependencies": {
