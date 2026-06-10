@@ -1,7 +1,8 @@
 import type { Position } from "./positions.js";
 import type { Result } from "../utils.js";
 import { Transaction } from "./transactions.js";
-import type { AccountFolder, FolderSummary } from "./accounts.js";
+import type { AccountFolder } from "./accounts/folder.js";
+import type { FolderSummary } from "./accounts/summary.js";
 import type { Input } from "./transactions/inputs.js";
 import type { Output } from "./transactions/outputs.js";
 
@@ -23,10 +24,18 @@ export class Ledger {
         public equity: AccountFolder
     ) {}
 
+    /**
+     * Append one or more existing Transactions to the ledger history.
+     * @param transaction - One or more Transaction instances to add
+     */
+    public addTransaction(...transaction: Transaction[]): void {
+        this.transactions.push(...transaction);
+    }
+
     /** Constructs, validates, and appends a new {@link Transaction} to the history. */
     public newTransaction(stagedInputs: Input[], stagedOutputs: Output[]): Transaction {
         const transaction = new Transaction(stagedInputs, stagedOutputs, this.transactions);
-        this.transactions.push(transaction);
+        this.addTransaction(transaction);
         return transaction;
     }
 

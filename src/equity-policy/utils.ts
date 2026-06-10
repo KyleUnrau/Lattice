@@ -1,5 +1,5 @@
-import { UTXOConsumption, type Input } from "../transactions/inputs.js";
-import type { UTXO } from "../transactions/outputs.js";
+import { UTXOConsumption, type Input } from "../ledger-kernel/transactions/inputs.js";
+import type { UTXO } from "../ledger-kernel/transactions/outputs.js";
 
 /**
  * Extracts {@link UTXOConsumption} inputs from a mixed input array, returning each as a

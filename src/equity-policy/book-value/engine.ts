@@ -1,8 +1,8 @@
-import { ExchangedUTXI, ResidualUTXI } from "../transactions/cross-position.js";
-import { UTXI, UTXOConsumption, type Input } from "../transactions/inputs.js";
-import { UTXO } from "../transactions/outputs.js";
-import type { Transaction } from "../transactions.js";
-import type { Position } from "../positions.js";
+import { ExchangedUTXI, ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
+import { UTXI, UTXOConsumption, type Input } from "../../ledger-kernel/transactions/inputs.js";
+import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
+import type { Transaction } from "../../ledger-kernel/transactions.js";
+import type { Position } from "../../ledger-kernel/positions.js";
 import type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";
 
 export type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";

@@ -1,8 +1,15 @@
-import type { ExchangeRecapture } from "../equity-policy/exchange.js";
+import type { ExchangeRecapture } from "../../equity-policy/exchange.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
 import { UTXI } from "./inputs.js";
 import { UTXO } from "./outputs.js";
+
+/**
+ * Implemented by {@link ExchangePositionsAccount} and used as an opaque tag on {@link Exchange}
+ * to scope which exchanges a given account includes in its balance computation. Defined here
+ * rather than in `accounts/computed.ts` to avoid a circular import.
+ */
+export interface ExchangeAccountMarker {}
 
 /**
  * Links two single-position transactions through a locked conversion rate.
@@ -20,7 +27,8 @@ export class Exchange {
 
     constructor(
         from: {quantity: bigint, position: Position},
-        to: {quantity: bigint, position: Position}
+        to: {quantity: bigint, position: Position},
+        public readonly account?: ExchangeAccountMarker
     ) {
         this.from = new ExchangedUTXO(from.quantity, from.position, this);
         this.to = new ExchangedUTXI(to.quantity, to.position, this);

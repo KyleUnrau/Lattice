@@ -13,6 +13,7 @@ export type Result<T, E = Error> = { ok: true; value: T; } |
  */
 export function runCLI(context: Record<string, unknown>): void {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
+    Object.assign(globalThis, context);
 
     async function invokeCLI(): Promise<void> {
         const response = await rl.question("> ");
