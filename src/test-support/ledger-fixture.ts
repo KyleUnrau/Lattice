@@ -17,10 +17,12 @@ export interface Fixture {
     cad: Position;
     usd: Position;
     oranges: Position;
+    btc: Position;
     ledger: Ledger;
     engine: BookValueEngine;
     cash: Account;
     inventory: Account;
+    wallet: Account;
     drawings: Account;
     openingBalance: Account;
     exchangeExpense: Account;
@@ -29,12 +31,16 @@ export interface Fixture {
     cadToUsd: ExchangePositionsAccount;
     usdToOranges: ExchangePositionsAccount;
     orangesToCad: ExchangePositionsAccount;
+    btcToCad: ExchangePositionsAccount;
+    usdToCad: ExchangePositionsAccount;
+    cadToBtc: ExchangePositionsAccount;
 }
 
 export function makeFixture(): Fixture {
     const cad: Position = { name: "Canadian Dollars", decimals: 2 };
     const usd: Position = { name: "United States Dollars", decimals: 2 };
     const oranges: Position = { name: "Oranges", decimals: 0 };
+    const btc: Position = { name: "Bitcoin", decimals: 8 };
 
     const netAssets = new AccountFolder("Net Assets", Orientation.Positive);
     const netWorth = new AccountFolder("Net Worth", Orientation.Negative);
@@ -48,6 +54,7 @@ export function makeFixture(): Fixture {
 
     const cash = currentAssets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const inventory = currentAssets.addAccount("Inventory", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+    const wallet = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const openingBalance = netWorth.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const drawings = netWorth.addAccount("Drawings", Orientation.Negative, fifo<UTXO>, fifo<UTXI>);
     const exchangeExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
@@ -59,8 +66,11 @@ export function makeFixture(): Fixture {
     const cadToUsd = netWorth.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
     const usdToOranges = netWorth.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
     const orangesToCad = netWorth.addExchangeAccount("Transfers Oranges→CAD", Orientation.Positive);
+    const btcToCad = netWorth.addExchangeAccount("Transfers BTC→CAD", Orientation.Positive);
+    const usdToCad = netWorth.addExchangeAccount("Transfers USD→CAD", Orientation.Positive);
+    const cadToBtc = netWorth.addExchangeAccount("Transfers CAD→BTC", Orientation.Positive);
 
-    return { cad, usd, oranges, ledger, engine, cash, inventory, drawings, openingBalance, exchangeExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad };
+    return { cad, usd, oranges, btc, ledger, engine, cash, inventory, wallet, drawings, openingBalance, exchangeExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad, btcToCad, usdToCad, cadToBtc };
 }
 
 /** Commits an opening-balance credit of `value` units of `position` into `cash`. */

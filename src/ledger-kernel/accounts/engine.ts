@@ -81,8 +81,8 @@ export class AccountEngine {
 
     public getRootBalance(transactions: Transaction[]): bigint {
         let rootBalance = 0n;
-        for (const utxi of this.utxis) rootBalance -= utxi.calculateAvailable(transactions);
-        for (const utxo of this.utxos) rootBalance += utxo.calculateAvailable(transactions);
+        for (const utxi of this.utxis) if (utxi.isCommitted(transactions)) rootBalance -= utxi.calculateAvailable(transactions);
+        for (const utxo of this.utxos) if (utxo.isCommitted(transactions)) rootBalance += utxo.calculateAvailable(transactions);
         return rootBalance;
     }
 }

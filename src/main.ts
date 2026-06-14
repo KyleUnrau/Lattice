@@ -1,6 +1,6 @@
 import { clear } from "node:console";
 
-import { dump, muldiv, runCLI, write } from "./utils.js";
+import { muldiv, runCLI } from "./utils.js";
 import { formatQuantity } from "./ledger-kernel/positions.js";
 import { scale, unscale } from "./ledger-kernel/positions.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
@@ -112,13 +112,53 @@ function phase1() {
 
 // USD 375 → Oranges 1500 (forward exchange; USD→CAD provenance inherited by oranges).
 function phase2() {
-    return commitSwap(cash, usd, 375, inventory, oranges, 1500, usdToOrangesPositions);
+    const fromInputs = cash.generateInputs(usd, 375, ledger.transactions);
+    const toOutputs = inventory.generateOutputs(oranges, 1500, ledger.transactions);
+
+    const exchange = swap({
+        fromInputs,
+        toOutputs,
+        engine,
+        transactions: ledger.transactions,
+        residualAccount: {gain: capitalGains, loss: capitalLosses},
+        exchangeAccount: usdToOrangesPositions
+    });
+
+    const from = ledger.newTransaction(fromInputs, exchange.fromOutputs);
+    ledger.addTransaction(exchange.to, ...exchange.intermediates);
+
+    return {
+        from,
+        to: exchange.to,
+        intermediates: exchange.intermediates,
+        resolution: exchange.resolution
+    };
 }
 
 // Oranges 1500 → CAD 600 — closes the CAD→USD→Oranges→CAD loop. The engine recursively
 // recaptures every edge (USD→Oranges and CAD→USD) and recognizes the 100 CAD gain.
 function phase3(proceeds: number = 600) {
-    return commitSwap(inventory, oranges, 1500, cash, cad, proceeds, orangesToCadPositions);
+    const fromInputs = inventory.generateInputs(oranges, 1500, ledger.transactions);
+    const toOutputs = cash.generateOutputs(cad, proceeds, ledger.transactions);
+
+    const exchange = swap({
+        fromInputs,
+        toOutputs,
+        engine,
+        transactions: ledger.transactions,
+        residualAccount: {gain: capitalGains, loss: capitalLosses},
+        exchangeAccount: orangesToCadPositions
+    });
+
+    const from = ledger.newTransaction(fromInputs, exchange.fromOutputs);
+    ledger.addTransaction(exchange.to, ...exchange.intermediates);
+
+    return {
+        from,
+        to: exchange.to,
+        intermediates: exchange.intermediates,
+        resolution: exchange.resolution
+    };
 }
 
 runCLI({
@@ -138,6 +178,7 @@ runCLI({
     openingBalance,
     exchangeExpense,
     capitalGains,
+    capitalLosses,
     cadToUsdPositions,
     usdToOrangesPositions,
     orangesToCadPositions,
@@ -146,8 +187,6 @@ runCLI({
     engine,
     fifo,
     clear,
-    dump,
-    write,
     Account,
     AccountFolder,
     Ledger,

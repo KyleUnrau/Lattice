@@ -146,9 +146,9 @@ export class ResidualAccount extends ComputedAccount {
     public getRootRawBalance(position: Position, transactions: Transaction[]): bigint {
         let balance = 0n;
         for (const utxi of this.utxis)
-            if (utxi.position === position) balance -= utxi.calculateAvailable(transactions);
+            if (utxi.position === position && utxi.isCommitted(transactions)) balance -= utxi.calculateAvailable(transactions);
         for (const utxo of this.utxos)
-            if (utxo.position === position) balance += utxo.calculateAvailable(transactions);
+            if (utxo.position === position && utxo.isCommitted(transactions)) balance += utxo.calculateAvailable(transactions);
         return balance;
     }
 

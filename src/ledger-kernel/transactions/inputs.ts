@@ -42,6 +42,15 @@ export class UTXI {
     }
 
     /**
+     * Whether this UTXI has been committed — i.e. it appears as an input of some transaction in
+     * `transactions`. A generated-but-not-yet-committed lot returns `false`, so balances exclude it
+     * until the transaction that introduces it is appended to the ledger.
+     */
+    public isCommitted(transactions: Transaction[]): boolean {
+        return transactions.some(transaction => transaction.inputs.includes(this));
+    }
+
+    /**
      * Creates a {@link UTXIConsumption} for `quantity` units, asserting the available balance
      * is sufficient. The returned object must be placed in a transaction's outputs.
      */

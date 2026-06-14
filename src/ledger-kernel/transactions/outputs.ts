@@ -42,6 +42,15 @@ export class UTXO {
     }
 
     /**
+     * Whether this UTXO has been committed — i.e. it appears as an output of some transaction in
+     * `transactions`. A generated-but-not-yet-committed lot returns `false`, so balances exclude it
+     * until the transaction that introduces it is appended to the ledger.
+     */
+    public isCommitted(transactions: Transaction[]): boolean {
+        return transactions.some(transaction => transaction.outputs.includes(this));
+    }
+
+    /**
      * Creates a {@link UTXOConsumption} for `quantity` units, asserting the available balance
      * is sufficient. The returned object must be placed in a transaction's inputs.
      */

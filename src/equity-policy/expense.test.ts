@@ -58,3 +58,41 @@ test("expensing multi-hop value threads intermediate positions through hop trans
         assert.equal(f.usdToOranges.getRootRawBalance(position, f.ledger.transactions), 0n, `usdToOranges ${position.name}`);
     }
 });
+
+test("expensing residual-derived value closes the residual leg and recognizes its inherited origin basis", () => {
+    const f = makeFixture();
+    openInto(f, f.wallet, f.btc, 0.02);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad); // 0.01 BTC → 1000 CAD
+    commitSwap(f, f.cash, f.cad, 1000, f.cash, f.usd, 750, f.cadToUsd);    // 1000 CAD → 750 USD
+    commitSwap(f, f.cash, f.usd, 750, f.cash, f.cad, 1100, f.usdToCad);    // close loop: 100 CAD gain, 0.001 BTC basis
+
+    // Cash holds 1100 CAD = 1000 recovered (BTC-derived) + 100 residual-derived (gain). Expense it all.
+    const inputs = f.cash.generateInputs(f.cad, 1100, f.ledger.transactions);
+    const resolution = commitExpense(f, inputs);
+
+    assert.ok(f.ledger.verify().ok, "ledger must verify after expensing residual-derived value");
+
+    // The recovered (non-residual) portion fully unwinds to its BTC origin: 0.01 BTC of cost basis.
+    assert.equal(resolution.recaptureGroups.length, 1);
+    assert.equal(resolution.recaptureGroups[0]!.position, f.btc);
+    assert.equal(resolution.recaptureGroups[0]!.totalQuantity, 1000000n, "0.01 BTC recovered basis");
+    assert.equal(resolution.originAmounts.length, 0, "no no-lineage surface value — it was all BTC-derived");
+
+    // The residual-derived portion is settled: its leg is closed and its deferred equity is
+    // re-recognized in the ORIGIN position (BTC), not left as origin CAD.
+    assert.equal(resolution.residualCloseOutputs.length, 1, "the residual leg is closed");
+    assert.equal(resolution.residualRecognitions.length, 1);
+    assert.equal(resolution.residualRecognitions[0]!.position, f.btc, "deferred gain recognized in BTC origin");
+    assert.equal(resolution.residualRecognitions[0]!.quantity, 100000n, "0.001 BTC of inherited basis");
+
+    // Cash fully expensed; total expense recognized in BTC = 0.01 (basis) + 0.001 (realized deferral) = 0.011.
+    assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 0);
+    assert.equal(f.exchangeExpense.getBalance(f.btc, f.ledger.transactions), 0.011);
+    assert.equal(f.exchangeExpense.getBalance(f.cad, f.ledger.transactions), 0, "nothing expensed in CAD");
+
+    // The provisional CAD gain is reversed and surfaces in BTC; the BTC→CAD path is fully recaptured.
+    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), 0n, "provisional CAD gain reversed");
+    assert.equal(f.capitalGains.getRootRawBalance(f.btc, f.ledger.transactions), -100000n, "0.001 BTC gain realized");
+    assert.equal(f.btcToCad.getRootRawBalance(f.btc, f.ledger.transactions), 0n, "BTC→CAD settled");
+    assert.equal(f.btcToCad.getRootRawBalance(f.cad, f.ledger.transactions), 0n);
+});
