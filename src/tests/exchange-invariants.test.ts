@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { makeFixture, openInto, commitSwap, type Fixture } from "../test-support/ledger-fixture.js";
-import { collectOriginLeaves } from "./book-value/lineage.js";
 import { UTXOConsumption } from "../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../ledger-kernel/transactions/outputs.js";
 import { ResidualUTXI, ResidualUTXO } from "../ledger-kernel/transactions/cross-position.js";
 import type { Position } from "../ledger-kernel/positions.js";
+import { commitSwap, makeFixture, openInto, type Fixture } from "./test-support/ledger-fixture.js";
+import { collectOriginLeaves } from "../equity-policy/book-value/lineage.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

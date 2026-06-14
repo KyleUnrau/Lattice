@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node --inspect dist/main.js",
     "build": "tsc",
-    "test": "tsc && node --test \"dist/**/*.test.js\"",
+    "test": "tsc && node --test \"dist/tests/**/*.test.js\"",
     "write-git-changes": "git --no-pager diff --cached > git-changes.txt" 
   },
   "devDependencies": {

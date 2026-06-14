@@ -1,13 +1,13 @@
-import { fifo } from "../ledger-kernel/disposal-methods/basic-fifo.js";
-import { UTXO } from "../ledger-kernel/transactions/outputs.js";
-import { UTXI } from "../ledger-kernel/transactions/inputs.js";
-import { Ledger, Orientation } from "../ledger-kernel/ledger.js";
-import { AccountFolder } from "../ledger-kernel/accounts/folder.js";
-import type { Account } from "../ledger-kernel/accounts/account.js";
-import type { Position } from "../ledger-kernel/positions.js";
-import { BookValueEngine } from "../equity-policy/book-value/engine.js";
-import { swap, type SwapResult } from "../equity-policy/exchange/index.js";
-import type { ExchangePositionsAccount, ResidualAccount } from "../ledger-kernel/accounts/computed.js";
+import { BookValueEngine } from "../../equity-policy/book-value/engine.js";
+import { type SwapResult, swap } from "../../equity-policy/exchange/swap.js";
+import type { Account } from "../../ledger-kernel/accounts/account.js";
+import type { ResidualAccount, ExchangePositionsAccount } from "../../ledger-kernel/accounts/computed.js";
+import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";
+import { fifo } from "../../ledger-kernel/disposal-methods/basic-fifo.js";
+import { Ledger, Orientation } from "../../ledger-kernel/ledger.js";
+import type { Position } from "../../ledger-kernel/positions.js";
+import type { UTXI } from "../../ledger-kernel/transactions/inputs.js";
+import type { UTXO } from "../../ledger-kernel/transactions/outputs.js";
 
 /**
  * A self-contained chart of accounts + ledger for tests, mirroring the shape of `src/main.ts`

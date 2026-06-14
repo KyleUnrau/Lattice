@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-
-import { makeFixture, openInto, commitSwap } from "../test-support/ledger-fixture.js";
-import { expense } from "./expense.js";
+import { expense } from "../equity-policy/expense.js";
+import { commitSwap, makeFixture, openInto } from "./test-support/ledger-fixture.js";
 
 // Commits an expense end to end: the consuming/surface transaction plus the hop and
 // expense-recognition transactions the resolution emits.
