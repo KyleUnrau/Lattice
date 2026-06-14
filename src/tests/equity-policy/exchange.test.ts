@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { collectOriginLeaves } from "../equity-policy/book-value/lineage.js";
-import { ExchangeResolution } from "../equity-policy/exchange/resolution.js";
-import { UTXOConsumption } from "../ledger-kernel/transactions/inputs.js";
-import { makeFixture, openInto, commitSwap } from "./test-support/ledger-fixture.js";
+import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
+import { ExchangeResolution } from "../../equity-policy/exchange/resolution.js";
+import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
+import { makeFixture, openInto, commitSwap } from "../utils/ledger-fixture.js";
 
 // Helper: the open-position balance an ExchangePositionsAccount reports for a position.
 function openBalance(account: { getRootRawBalance(p: any, t: any): bigint }, position: any, transactions: any): bigint {

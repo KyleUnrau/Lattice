@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeFixture, openInto } from "./test-support/ledger-fixture.js";
+import { makeFixture, openInto } from "../utils/ledger-fixture.js";
 
 test("generated lots only affect balances once their transaction is committed", () => {
     const f = makeFixture();
