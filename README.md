@@ -1,6 +1,6 @@
-# Ledger Kernel
+# Lattice — Accounting Software
 
-A graph-oriented accounting kernel for modeling deterministic financial state, transaction lineage, position flows, cost basis, and exchange relationships across multiple independent positions.
+A graph-oriented accounting system for modeling deterministic financial state, transaction lineage, position flows, cost basis, and exchange relationships across multiple independent positions.
 
 The system enforces double-entry conservation at every transaction, models value as consumable lots with natural lineage, and tracks cross-position exchange rates so that cost basis is a structural property of the transaction graph — not metadata stored alongside it.
 

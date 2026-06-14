@@ -1,6 +1,6 @@
 # Overview
 
-Ledger Kernel is a graph-oriented accounting system designed for tracking financial state across multiple independent positions — currencies, commodities, crypto assets, or any measurable quantity — with full provenance tracing through chains of exchanges.
+Lattice is a graph-oriented accounting system designed for tracking financial state across multiple independent positions — currencies, commodities, crypto assets, or any measurable quantity — with full provenance tracing through chains of exchanges.
 
 It sits in a design space between three existing approaches:
 
@@ -10,7 +10,7 @@ It sits in a design space between three existing approaches:
 | UTXO ledger (e.g. Bitcoin) | Consumable lots, natural audit trail | No cross-asset tracking; no cost basis engine |
 | Cost-basis engines | Tracks acquisition cost | Typically bolted onto existing records; not a first-class accounting model |
 
-Ledger Kernel takes the best of all three: it enforces double-entry conservation at every transaction, models value as consumable lots with natural lineage, and tracks cross-position exchange rates so that cost basis is a structural property of the transaction graph rather than metadata.
+Lattice takes the best of all three: it enforces double-entry conservation at every transaction, models value as consumable lots with natural lineage, and tracks cross-position exchange rates so that cost basis is a structural property of the transaction graph rather than metadata.
 
 ---
 

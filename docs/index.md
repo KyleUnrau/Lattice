@@ -1,4 +1,4 @@
-# Ledger Kernel — Documentation
+# Lattice — Documentation
 
 ## Concepts
 
