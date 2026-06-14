@@ -51,8 +51,8 @@ export class AccountFolder implements AccountNode {
         return child;
     }
 
-    public addResidualAccount(name: string, localOrientation: Orientation): ResidualAccount {
-        const child = new ResidualAccount(name, localOrientation);
+    public addResidualAccount(name: string, localOrientation: Orientation, negativeLabel?: string): ResidualAccount {
+        const child = new ResidualAccount(name, localOrientation, negativeLabel);
         this.addChild(child);
         return child;
     }

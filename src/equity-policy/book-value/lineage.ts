@@ -1,6 +1,6 @@
-import type { BasisPath, ResidualPath } from "./book-value/types.js";
-import type { Position } from "../ledger-kernel/positions.js";
-import type { Exchange } from "../ledger-kernel/transactions/cross-position.js";
+import type { BasisPath, ResidualPath } from "./types.js";
+import type { Position } from "../../ledger-kernel/positions.js";
+import type { Exchange } from "../../ledger-kernel/transactions/cross-position.js";
 
 /**
  * A single exchange edge selected for recapture, with the to-side amount being recaptured
@@ -111,7 +111,7 @@ function collectChainEdges(
  * quantities across all edges sharing the same exchange. Ensures each exchange is recaptured
  * exactly once even when its lineage appears across multiple consumed UTXOs or branches.
  */
-export function groupRecapturesByExchange(edges: RecaptureEdge[]): Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }> {
+function groupRecapturesByExchange(edges: RecaptureEdge[]): Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }> {
     const grouped = new Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }>();
     for (const edge of edges) {
         const existing = grouped.get(edge.exchange) ?? { toQuantity: 0n, fromQuantity: 0n };
@@ -128,7 +128,7 @@ export function groupRecapturesByExchange(edges: RecaptureEdge[]): Map<Exchange,
  * consumed value. Recurses through exchange nodes (a residual can sit behind a later exchange);
  * residual nodes are terminal and not recursed into.
  */
-export function collectResidualNodes(basis: BasisPath[]): ResidualPath[] {
+function collectResidualNodes(basis: BasisPath[]): ResidualPath[] {
     const result: ResidualPath[] = [];
     for (const path of basis) {
         if (path.type === "residual") result.push(path);

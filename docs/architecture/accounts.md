@@ -70,9 +70,7 @@ Two concrete subtypes:
 Owns `ResidualUTXI` (gain) and `ResidualUTXO` (loss) lots. Lots are registered by the equity-policy layer:
 
 ```ts
-const capitalGains = netIncome.addResidualAccount("Capital Gains (Losses)", Orientation.Positive);
-
-// called by ExchangeResolution / exchange()
+// called by ExchangeResolution / swap() / expense()
 residualAccount.addResidualInput(quantity, position, originBasis)  // gain
 residualAccount.addResidualOutput(quantity, position, originBasis) // loss
 ```
@@ -81,18 +79,54 @@ Each `ResidualAccount` scans only its own lots for its balance. Multiple residua
 
 The `originBasis` argument is a `Map<Position, bigint>` that records the deep-origin composition of the residual, enabling the cost basis engine to trace lineage through residual lots in subsequent transactions.
 
+Every minted lot also carries a back-reference to the `ResidualAccount` that created it (`ResidualUTXI.account` / `ResidualUTXO.account`). This lets a later settlement re-recognize a residual's deferred equity in the **same** account that originally deferred it — when residual-derived value is expensed or re-exchanged, the closed leg's equity shifts position within its own account rather than being routed to an externally supplied one. Because of this, `expense()` needs no residual-target argument at all.
+
+**Dual-name display** — an optional `negativeLabel` parameter causes `summarize()` to return an alternate name when the per-position balance is negative, allowing a single account to display as "Capital Gains" when net-positive and "Capital Losses" when net-negative:
+
+```ts
+// Single account, name adapts to the balance sign
+const capitalGains = netIncome.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
+```
+
+**Split gain/loss routing** — the `ResidualTarget` union type accepted by `swap()` and `ExchangeResolution` (for the *new* gain/loss they recognize against proceeds; settlements of pre-existing residuals self-route to their own account) allows gains and losses to be routed to separate accounts:
+
+```ts
+// Two accounts, each receives only one direction
+const capitalGains  = netIncome.addResidualAccount("Capital Gains",  Orientation.Positive);
+const capitalLosses = netIncome.addResidualAccount("Capital Losses", Orientation.Negative);
+
+swap({ ..., residualAccount: { gain: capitalGains, loss: capitalLosses } });
+```
+
+Use `gainAccountOf(target)` and `lossAccountOf(target)` (exported from `equity-policy/exchange/index.ts`) when you need to extract one account from a `ResidualTarget` in custom policy code.
+
 ### ExchangePositionsAccount
 
-A computed account that scans all transactions for remaining `ExchangedUTXO` and `ExchangedUTXI` availability:
+A computed account that scans transactions for remaining `ExchangedUTXO` and `ExchangedUTXI` availability:
 
 - Remaining `ExchangedUTXO` availability → positive raw balance (asset still held at exchange)
 - Remaining `ExchangedUTXI` availability → negative raw balance (exchange's reciprocal claim)
 
+Adding this account to the equity tree ensures `ledger.verify()` passes even with open, partially-settled exchanges: each open exchange contributes a matching +/− pair that cancels with the asset-side flows that funded it.
+
+**Universal mode** (default) — one account covering all exchanges with no explicit scoping assignment:
+
 ```ts
 const exchangePositions = netWorth.addExchangeAccount("Net Transfers In (Out)", Orientation.Positive);
+// All swaps/ExchangeResolutions that don't pass exchangeAccount appear here
 ```
 
-Adding this account to the equity tree ensures `ledger.verify()` passes even with open, partially-settled exchanges: each open exchange contributes a matching +/− pair that cancels with the asset-side flows that funded it.
+**Scoped mode** — multiple accounts, each tracking a specific exchange direction by passing the account to `swap()` or `ExchangeResolution`. Each forward exchange is tagged to exactly one account; exchanges tagged to a different account are excluded.
+
+```ts
+const cadToUsdPositions    = netWorth.addExchangeAccount("Transfers CAD→USD",    Orientation.Positive);
+const usdToOrangesPositions = netWorth.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
+
+swap({ ..., exchangeAccount: cadToUsdPositions });    // phase 1 exchange tagged here
+swap({ ..., exchangeAccount: usdToOrangesPositions }); // phase 2 exchange tagged here
+```
+
+When using scoped accounts, every forward exchange should be explicitly tagged to exactly one account. Untagged exchanges (those created by `swap()` or `ExchangeResolution` without an `exchangeAccount`) appear in all accounts that are in universal mode (i.e., have never been used as a tag). Mixing tagged and untagged exchanges on the same ledger is allowed but requires care: the universal account will capture everything untagged, while scoped accounts capture only their own.
 
 ---
 

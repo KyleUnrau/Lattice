@@ -116,14 +116,29 @@ export class ResidualAccount extends ComputedAccount {
     private readonly utxis: ResidualUTXI[] = [];
     private readonly utxos: ResidualUTXO[] = [];
 
+    /**
+     * @param negativeLabel - When provided, `summarize()` returns this name instead of `name`
+     *   whenever the balance in the queried position is negative. Enables a single account to
+     *   display as e.g. "Capital Gains" when net-positive and "Capital Losses" when net-negative.
+     */
+    constructor(name: string, localOrientation: Orientation, public readonly negativeLabel?: string) {
+        super(name, localOrientation);
+    }
+
+    public override summarize(position: Position, transactions: Transaction[]): AccountSummary {
+        const balance = this.getBalance(position, transactions);
+        const name = this.negativeLabel !== undefined && balance < 0 ? this.negativeLabel : this.name;
+        return { name, balance };
+    }
+
     public addResidualInput(quantity: bigint, position: Position, originBasis: Map<Position, bigint>): ResidualUTXI {
-        const utxi = new ResidualUTXI(quantity, position, originBasis);
+        const utxi = new ResidualUTXI(quantity, position, originBasis, this);
         this.utxis.push(utxi);
         return utxi;
     }
 
     public addResidualOutput(quantity: bigint, position: Position, originBasis: Map<Position, bigint>): ResidualUTXO {
-        const utxo = new ResidualUTXO(quantity, position, originBasis);
+        const utxo = new ResidualUTXO(quantity, position, originBasis, this);
         this.utxos.push(utxo);
         return utxo;
     }
@@ -150,5 +165,3 @@ export class ResidualAccount extends ComputedAccount {
         return result;
     }
 }
-
-

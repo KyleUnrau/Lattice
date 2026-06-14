@@ -73,6 +73,53 @@ Residuals are registered directly in a `ResidualAccount` (an equity account), wh
 
 ---
 
+## Three Layers: Primitives, Resolution, Swap
+
+The exchange system is deliberately split into three layers, from lowest to highest. Use the highest one that fits; drop down when you need more control.
+
+| Layer | What it is | Where | Owns transactions? |
+|---|---|---|---|
+| **Exchange primitives** | `Exchange`, `ExchangedUTXO/UTXI`, `ResidualUTXO/UTXI`, `Exchange.recapture` — the kernel-level locked-rate links and their consumption. | `ledger-kernel/transactions/cross-position.ts` | No — they are lines you place into transactions. |
+| **Exchange resolution** | `ExchangeResolution` (built on `computeRecaptureResolution` / `unwind`). Given **only the exchanged portion** of consumed value plus the proceeds, it computes every line — recaptures, the forward exchange, gain/loss residuals, residual-node settlements — and hands them back as arrays. | `equity-policy/exchange/resolution.ts` | No — **you** assemble the transactions. |
+| **`swap()`** | The convenience helper for the clean, full-quantity, two-account case. Draws the source inputs, resolves, and commits the consuming → hops → receiving chain. | `equity-policy/exchange/swap.ts` | Yes — it owns the whole transaction on each side. |
+
+`swap()` is the right tool when the entire source draw is exchanged into the entire proceeds and nothing else shares those transactions. The moment that stops being true — a partial exchange, or an event that also has a fee/deposit/withdrawal — reach for `ExchangeResolution` directly.
+
+---
+
+## Partial and Mixed Exchanges
+
+`ExchangeResolution` resolves **the exchanged portion only**. Two guarantees follow by construction:
+
+- Its from-side outputs sum to exactly `sum(exchangedInputs)`, and its to-side inputs balance exactly against `actualProceeds`. Every exchange/recapture/residual line links **only** the exchanged value.
+- Everything else in the event is yours to build. Non-exchanged value simply lives in other transactions.
+
+```ts
+// Exchange 400 of a 500 CAD position into USD; withdraw the other 100 CAD as cash.
+const exchanged = cash.generateInputs(cad, 400, ledger.transactions);
+const res = new ExchangeResolution(exchanged, usd, 300, engine, ledger.transactions,
+                                   capitalGains, cadToUsdPositions);
+
+// Consuming (exchange) transaction — exchange lines only:
+ledger.newTransaction(exchanged, res.getFromOutputs());
+res.getIntermediateTransactions().forEach(h => ledger.newTransaction(h.inputs, h.outputs));
+// Receiving (exchange) transaction:
+ledger.newTransaction(res.getToInputs(),
+    [...cash.generateOutputs(usd, 300, ledger.transactions), ...res.getToOutputs()]);
+
+// The withdrawal is an INDEPENDENT transaction, not extra lines on the one above:
+ledger.newTransaction(cash.generateInputs(cad, 100, ledger.transactions),
+                      drawer.generateOutputs(cad, 100, ledger.transactions));
+```
+
+### Why the withdrawal is its own transaction
+
+The `BookValueEngine` attributes each input's basis across **all** of a transaction's outputs proportionally — it treats every transaction's outputs as a *uniform blend* of its inputs. That is exact for a pure exchange (all outputs derive uniformly from all inputs) and for proceeds that blend recovered basis with a gain. But if you drop an *independent* sub-flow — a fee or withdrawal with its own input→output correspondence — into the same single-position transaction, its lineage bleeds into the exchanged value and corrupts basis tracing.
+
+So the rule is: **lines may share a transaction only when they form a single uniform blend. Independent effects go in separate transactions.** The kernel will not stop you (it only checks single-position + balance), so this is a discipline the equity-policy layer keeps — see [Invariants](../architecture/invariants.md).
+
+---
+
 ## Open vs Settled
 
 An exchange position is **open** as long as one or both sides have remaining unconsumed availability.
@@ -85,22 +132,28 @@ The `ExchangePositionsAccount` computed equity account scans every `ExchangedUTX
 
 ## The High-Level API
 
-In normal usage, you don't construct exchanges directly. The `swap()` function handles the full cycle:
+For the clean, full-quantity, two-account case you don't construct exchanges directly — the `swap()` function handles the full cycle (for partial or mixed events, drop down to `ExchangeResolution` as shown above):
 
 ```ts
 swap({
     source: cadAccount, from: cad, quantity: 500,
     destination: usdAccount, to: usd, proceeds: 375,
-    engine, ledger, residualAccount: capitalGains
+    engine, ledger,
+    residualAccount: capitalGains,   // where to recognize gains/losses
+    exchangeAccount: cadToUsdPositions  // optional: scope this exchange to a specific account
 });
 ```
 
 `swap()` internally calls `ExchangeResolution`, which:
 1. Traces the provenance of the consumed value via `BookValueEngine`
 2. Identifies which prior exchanges loop back to `usd` and recaptures them
-3. Opens a forward exchange for any portion without prior loop lineage
-4. Recognizes any gain/loss as a residual in `capitalGains`
+3. Opens a forward exchange for any portion without prior loop lineage (scoped to the required `exchangeAccount`)
+4. Recognizes any gain/loss as a residual — gains go to the gain account, losses to the loss account (see `ResidualTarget` in [Account System](../architecture/accounts.md))
 5. Commits all transactions (consuming, intermediate hops, receiving) to the ledger
+
+**`residualAccount`** accepts either a single `ResidualAccount` (gains and losses share it) or `{ gain: ResidualAccount, loss: ResidualAccount }` to route them to separate accounts.
+
+**`exchangeAccount`** scopes the forward exchange to a specific `ExchangePositionsAccount`'s open-position view. It is **always required** — supply one even when the exchange fully closes a loop and no forward leg opens (the account will simply carry a zero balance). This keeps the type consistent and avoids any risk of silently minting an untagged, unscoped open position.
 
 See [Unwind Algorithm](../architecture/unwind.md) for the recapture logic, and [Four-Phase Example](../guides/example.md) for a full walkthrough.
 

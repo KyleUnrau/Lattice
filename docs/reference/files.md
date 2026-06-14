@@ -25,7 +25,7 @@ src/
 │   ├── transactions/                          [kernel] Lot and exchange primitives
 │   │   ├── inputs.ts                          UTXI, UTXOConsumption, Input union type
 │   │   ├── outputs.ts                         UTXO, UTXIConsumption, Output union type
-│   │   └── cross-position.ts                 Exchange, ExchangedUTXO/UTXI, ResidualUTXO/UTXI, ExchangeRecapture
+│   │   └── cross-position.ts                 Exchange, ExchangedUTXO/UTXI, ResidualUTXO/UTXI, ExchangeAccountMarker
 │   │
 │   └── disposal-methods/                      [kernel] Lot selection strategies
 │       ├── disposals.ts                       DisposalMethod<T> type definition
@@ -33,15 +33,18 @@ src/
 │
 └── equity-policy/                             [policy] Business logic layered on the kernel
     ├── book-value/
-    │   ├── engine.ts                          BookValueEngine — backward basis traversal
+    │   ├── engine.ts                          BookValueEngine — backward basis traversal; compute(inputs) is the public entry
+    │   ├── lineage.ts                         unwind(), collectChainEdges(), groupRecapturesByExchange(),
+    │   │                                      collectResidualNodes(), collectOriginLeaves()
     │   └── types.ts                           BasisPath, OriginPath, ExchangePath, ResidualPath
-    ├── lineage.ts                             unwind(), collectChainEdges(), groupRecapturesByExchange(),
-    │                                          collectResidualNodes(), collectOriginLeaves()
-    ├── recapture.ts                           computeRecaptureResolution() — full recapture math pipeline
-    ├── exchange.ts                            ExchangeResolution class, ExchangeRecapture, HopTransaction
-    ├── swap.ts                                swap() high-level exchange entry point, SwapRequest, SwapResult
-    ├── expense.ts                             expense() full-unwind expense recording, ExpenseResolution
-    └── utils.ts                               consumedUTXOsFromInputs() helper
+    ├── exchange/                              Exchange pipeline — everything needed to record an exchange
+    │   ├── index.ts                           Public re-exports for the exchange module
+    │   ├── types.ts                           ResidualTarget, gainAccountOf, lossAccountOf, ExchangeRecapture, HopTransaction
+    │   ├── recapture.ts                       computeRecaptureResolution() — proceeds split, gain/loss, forward-exchange math
+    │   ├── resolution.ts                      ExchangeResolution — builds accounting entries (inputs/outputs) from the recapture math
+    │   └── swap.ts                            swap() high-level helper for the clean full-quantity two-account case; SwapRequest, SwapResult
+    ├── recaptures.ts                          Shared recapture-plan primitives: summarizeConsumption(), executeRecaptures(), classifyRecaptures()
+    └── expense.ts                             expense() full-unwind expense recording, ExpenseResolution
 ```
 
 ---

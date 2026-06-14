@@ -16,14 +16,19 @@ Net Assets (+)
 
 Net Worth (−)
   ├─ Opening Balance (+)
-  ├─ Net Transfers In (Out) [ExchangePositionsAccount] (+)
+  ├─ Transfers CAD→USD    [ExchangePositionsAccount, scoped] (+)
+  ├─ Transfers USD→Oranges [ExchangePositionsAccount, scoped] (+)
   └─ Net Income (+)
+       ├─ Capital Gains [ResidualAccount, dual-name] (+)
        └─ Expenses (−)
             └─ Exchange Expense (+)
-       └─ Capital Gains (Losses) [ResidualAccount] (+)
 ```
 
 All positions use 2 decimal places (`decimals: 2`) except Oranges (`decimals: 0`, whole units).
+
+**Capital Gains** uses the dual-name feature: its `negativeLabel` is `"Capital Losses"`, so `summarize()` returns `"Capital Losses"` in any position where the balance is net-negative.
+
+**The two exchange accounts are scoped**: each `swap()` call passes `exchangeAccount` so its forward exchange is tagged exclusively to that account. Neither account tracks exchanges from the other direction.
 
 ---
 
@@ -52,12 +57,14 @@ function phase1() {
     return swap({
         source: cash, from: cad, quantity: 500,
         destination: cash, to: usd, proceeds: 375,
-        engine, ledger, residualAccount: capitalGains
+        engine, ledger,
+        residualAccount: capitalGains,
+        exchangeAccount: cadToUsdPositions
     });
 }
 ```
 
-500 CAD is exchanged for 375 USD. The basis engine traces the 500 CAD to the phase 0 `UTXI` — a plain origin path with no prior exchange lineage in USD. Since there is no loop to recapture, the entire portion opens a **forward exchange** at the locked rate of 500 CAD / 375 USD.
+500 CAD is exchanged for 375 USD. The basis engine traces the 500 CAD to the phase 0 `UTXI` — a plain origin path with no prior exchange lineage in USD. Since there is no loop to recapture, the entire portion opens a **forward exchange** at the locked rate of 500 CAD / 375 USD. The forward exchange is tagged to `cadToUsdPositions`, so only that account tracks this open position.
 
 **Transactions committed (by `swap()`):**
 
@@ -68,7 +75,8 @@ No intermediate hop transactions (single exchange edge).
 
 **Ledger state after phase 1:**
 - `cash`: 500 CAD, 375 USD
-- `exchangePositions`: +500 CAD, −375 USD (open exchange position)
+- `cadToUsdPositions`: +500 CAD, −375 USD (open exchange position)
+- `usdToOrangesPositions`: 0 (no exchanges tagged here yet)
 - `capitalGains`: 0 (no gain/loss; value suspended in forward exchange)
 
 ---
@@ -80,12 +88,14 @@ function phase2() {
     return swap({
         source: cash, from: usd, quantity: 375,
         destination: inventory, to: oranges, proceeds: 1500,
-        engine, ledger, residualAccount: capitalGains
+        engine, ledger,
+        residualAccount: capitalGains,
+        exchangeAccount: usdToOrangesPositions
     });
 }
 ```
 
-375 USD is exchanged for 1500 Oranges. The engine traces the 375 USD to the phase 1 `ExchangedUTXI`. The target position is Oranges — there is no loop back to Oranges in the USD lineage — so again, the entire portion opens a **forward exchange** at 375 USD / 1500 Oranges. The locked rate for the phase 1 CAD→USD exchange is inherited: Oranges now carries provenance tracing back through USD to the original CAD basis.
+375 USD is exchanged for 1500 Oranges. The engine traces the 375 USD to the phase 1 `ExchangedUTXI`. The target position is Oranges — there is no loop back to Oranges in the USD lineage — so again, the entire portion opens a **forward exchange** at 375 USD / 1500 Oranges. The locked rate for the phase 1 CAD→USD exchange is inherited: Oranges now carries provenance tracing back through USD to the original CAD basis. The forward exchange is tagged to `usdToOrangesPositions`.
 
 **Transactions committed:**
 
@@ -95,7 +105,8 @@ function phase2() {
 **Ledger state after phase 2:**
 - `cash`: 500 CAD
 - `inventory`: 1500 Oranges
-- `exchangePositions`: +500 CAD, 0 USD, −1500 Oranges (both exchanges open)
+- `cadToUsdPositions`: +500 CAD, −375 USD (phase 1 exchange still open)
+- `usdToOrangesPositions`: +375 USD, −1500 Oranges (phase 2 exchange now open)
 - `capitalGains`: 0
 
 ---
@@ -113,6 +124,8 @@ function phase3(proceeds: number = 600) {
 ```
 
 1500 Oranges are sold for 600 CAD. The engine traces the Oranges to `exchange2.to` (an `ExchangedUTXI`), which traces further to `exchange2.from` (USD), which traces to `exchange1.to` (ExchangedUTXI), which traces to `exchange1.from` (CAD). **CAD is the target position** — the loop closes.
+
+Note that `exchangeAccount` is required and is supplied even here (`orangesToCadPositions`). Because the loop closes completely, no forward exchange opens and the account carries a zero balance — but it must still be provided.
 
 **Unwind plan (loop mode, `stopAt = cad`):**
 
@@ -141,8 +154,9 @@ The gain is recognized as a `ResidualUTXI` (100 CAD) registered in `capitalGains
 **Ledger state after phase 3:**
 - `cash`: 500 CAD (original) + 600 CAD (proceeds) = 1100 CAD
 - `inventory`: 0 Oranges
-- `exchangePositions`: all exchanges settled → 0 for all positions
-- `capitalGains`: −100 CAD root balance (gain reduces equity; `rootOrientation = −1`)
+- `cadToUsdPositions`: 0 for all positions (exchange settled)
+- `usdToOrangesPositions`: 0 for all positions (exchange settled)
+- `capitalGains`: −100 CAD root balance (gain reduces equity; `rootOrientation = −1`; `summarize()` returns `"Capital Gains"` since balance is net-negative-root which displays as positive)
 
 ```
 > ledger.verify()

@@ -8,18 +8,15 @@ import { UTXO } from "./ledger-kernel/transactions/outputs.js";
 import { UTXI, UTXOConsumption } from "./ledger-kernel/transactions/inputs.js";
 import { Transaction } from "./ledger-kernel/transactions.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
-import { ExchangePositionsAccount, ResidualAccount } from "./ledger-kernel/accounts.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { Account } from "./ledger-kernel/accounts/account.js";
 import type { Position } from "./ledger-kernel/positions.js";
 import { Exchange } from "./ledger-kernel/transactions/cross-position.js";
 import { BookValueEngine } from "./equity-policy/book-value/engine.js";
-import { ExchangeResolution } from "./equity-policy/exchange.js";
+import { ExchangeResolution, gainAccountOf, lossAccountOf, swap, computeRecaptureResolution } from "./equity-policy/exchange/index.js";
 import { expense } from "./equity-policy/expense.js";
-import { swap } from "./equity-policy/swap.js";
-import { computeRecaptureResolution } from "./equity-policy/recapture.js";
-import { groupRecapturesByExchange, unwind } from "./equity-policy/lineage.js";
-import { consumedUTXOsFromInputs } from "./equity-policy/utils.js";
+import { unwind } from "./equity-policy/book-value/lineage.js";
+import type { ExchangePositionsAccount, ResidualAccount } from "./ledger-kernel/accounts/computed.js";
 
 // Positions (quantities stored in smallest tradable unit)
 const cad: Position = { name: "Canadian Dollars", decimals: 2 };
@@ -42,8 +39,24 @@ const inventory: Account = currentAssets.addAccount("Inventory", Orientation.Pos
 const wallet: Account = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 const openingBalance: Account = netWorth.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 const exchangeExpense: Account = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-const capitalGains: ResidualAccount = netIncome.addResidualAccount("Capital Gains (Losses)", Orientation.Positive);
-const exchangePositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Net Transfers In (Out)", Orientation.Positive);
+
+// Design A: dual-name — one account whose display name flips between "Capital Gains" and
+// "Capital Losses" depending on whether the per-position balance is positive or negative.
+const netCapitalGains: AccountFolder = netIncome.addFolder("Net Capital Gains (Losses)", Orientation.Positive);
+
+const capitalGains: ResidualAccount = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive);
+const capitalLosses: ResidualAccount = netCapitalGains.addResidualAccount("Capital Loss", Orientation.Negative);
+
+// Design B alternative (split accounts — uncomment to route gains/losses separately):
+// const capitalGains: ResidualAccount = netIncome.addResidualAccount("Capital Gains", Orientation.Positive);
+// const capitalLosses: ResidualAccount = netIncome.addResidualAccount("Capital Losses", Orientation.Negative);
+// Then pass `{ gain: capitalGains, loss: capitalLosses }` as `residualAccount` in each swap.
+
+// Scoped exchange accounts — each swap is tagged to its own account so open positions are
+// classified by direction rather than merged into a single net figure.
+const cadToUsdPositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
+const usdToOrangesPositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
+const orangesToCadPositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Transfers Oranges→CAD", Orientation.Positive);
 
 function phase0(): Transaction {
      const inputs = openingBalance.generateInputs(cad, 1000, ledger.transactions);
@@ -52,23 +65,60 @@ function phase0(): Transaction {
      return ledger.newTransaction(inputs, outputs);
 }
 
+// Draws the exchanged inputs, stages the proceeds, runs `swap`, and commits the resulting
+// transaction chain to the ledger in dependency order: consuming → hops → receiving.
+function commitSwap(
+    fromAccount: Account, fromPosition: Position, quantity: number,
+    toAccount: Account, toPosition: Position, proceeds: number,
+    exchangeAccount: ExchangePositionsAccount
+) {
+    const fromInputs = fromAccount.generateInputs(fromPosition, quantity, ledger.transactions);
+    const toOutputs = toAccount.generateOutputs(toPosition, proceeds, ledger.transactions);
+
+    const result = swap({
+        fromInputs, toOutputs, engine, transactions: ledger.transactions,
+        residualAccount: { gain: capitalGains, loss: capitalLosses }, exchangeAccount,
+    });
+
+    ledger.newTransaction(fromInputs, result.fromOutputs);
+    ledger.addTransaction(...result.intermediates, result.to);
+    return result;
+}
+
 // CAD 500 → USD 375 (forward exchange; CAD basis carried onto USD).
 function phase1() {
-    return swap({ source: cash, from: cad, quantity: 500, destination: cash, to: usd, proceeds: 375,
-                  engine, ledger, residualAccount: capitalGains });
+    const fromInputs = cash.generateInputs(cad, 500, ledger.transactions);
+    const toOutputs = cash.generateOutputs(usd, 375, ledger.transactions);
+
+    const exchange = swap({
+        fromInputs,
+        toOutputs,
+        engine,
+        transactions: ledger.transactions,
+        residualAccount: {gain: capitalGains, loss: capitalLosses},
+        exchangeAccount: cadToUsdPositions
+    });
+
+    const from = ledger.newTransaction(fromInputs, exchange.fromOutputs);
+    ledger.addTransaction(exchange.to, ...exchange.intermediates);
+    
+    return {
+        from,
+        to: exchange.to,
+        intermediates: exchange.intermediates,
+        resolution: exchange.resolution
+    };
 }
 
 // USD 375 → Oranges 1500 (forward exchange; USD→CAD provenance inherited by oranges).
 function phase2() {
-    return swap({ source: cash, from: usd, quantity: 375, destination: inventory, to: oranges, proceeds: 1500,
-                  engine, ledger, residualAccount: capitalGains });
+    return commitSwap(cash, usd, 375, inventory, oranges, 1500, usdToOrangesPositions);
 }
 
 // Oranges 1500 → CAD 600 — closes the CAD→USD→Oranges→CAD loop. The engine recursively
 // recaptures every edge (USD→Oranges and CAD→USD) and recognizes the 100 CAD gain.
 function phase3(proceeds: number = 600) {
-    return swap({ source: inventory, from: oranges, quantity: 1500, destination: cash, to: cad, proceeds,
-                  engine, ledger, residualAccount: capitalGains });
+    return commitSwap(inventory, oranges, 1500, cash, cad, proceeds, orangesToCadPositions);
 }
 
 runCLI({
@@ -88,7 +138,11 @@ runCLI({
     openingBalance,
     exchangeExpense,
     capitalGains,
-    exchangePositions,
+    cadToUsdPositions,
+    usdToOrangesPositions,
+    orangesToCadPositions,
+    gainAccountOf,
+    lossAccountOf,
     engine,
     fifo,
     clear,
@@ -111,9 +165,7 @@ runCLI({
     scale,
     unscale,
     formatQuantity,
-    consumedUTXOsFromInputs,
     computeRecaptureResolution,
-    groupRecapturesByExchange,
     unwind,
     phase0,
     phase1,

@@ -1,10 +1,11 @@
-import type { BookValueEngine } from "./book-value/engine.js";
-import type { BasisPath, ResidualPath } from "./book-value/types.js";
-import { scale, type Position } from "../ledger-kernel/positions.js";
-import type { Transaction } from "../ledger-kernel/transactions.js";
-import type { ExchangeRecapture } from "./exchange.js";
-import type { UTXO } from "../ledger-kernel/transactions/outputs.js";
-import { collectOriginLeaves, unwind } from "./lineage.js";
+import type { BookValueEngine } from "../book-value/engine.js";
+import type { ResidualPath } from "../book-value/types.js";
+import { scale, type Position } from "../../ledger-kernel/positions.js";
+import type { Transaction } from "../../ledger-kernel/transactions.js";
+import type { ExchangeRecapture } from "./types.js";
+import type { Input } from "../../ledger-kernel/transactions/inputs.js";
+import { collectOriginLeaves, unwind } from "../book-value/lineage.js";
+import { executeRecaptures, summarizeConsumption } from "../recaptures.js";
 
 // Internal intermediate shape — not part of the public API.
 type RecaptureComputation = {
@@ -47,32 +48,26 @@ type RecaptureComputation = {
  * take their proportional share, and the recovered loop's gain/loss residual absorbs the
  * remainder — so both the surface and target transactions balance exactly by construction.
  *
- * @param consumedUTXOs - UTXOs being consumed, with the partial quantity consumed from each.
+ * @param inputs - The exchanged-portion inputs being consumed (surface-position UTXO consumptions).
  * @param targetPosition - The proceeds position to resolve against (e.g. CAD).
  * @param totalActualReceived - Total proceeds in `targetPosition` for the full consumed quantity.
  * @param engine - Book value engine used to trace basis paths.
  * @param transactions - Full transaction history, required to issue recaptures.
  */
 export function computeRecaptureResolution(
-    consumedUTXOs: { source: UTXO; quantity: bigint; }[],
+    inputs: Input[],
     targetPosition: Position,
     totalActualReceived: number,
     engine: BookValueEngine,
     transactions: Transaction[]
 ): RecaptureComputation {
-    const surfacePosition = consumedUTXOs[0]!.source.position;
-    const totalConsumed = consumedUTXOs.reduce((sum, c) => sum + c.quantity, 0n);
+    const { surfacePosition, totalConsumed } = summarizeConsumption(inputs);
+    if (surfacePosition === undefined) throw new Error("computeRecaptureResolution requires at least one consumed input");
 
-    const allBasis: BasisPath[] = consumedUTXOs.flatMap(({ source, quantity }) => engine.compute(source, quantity));
-
-    const plan = unwind(allBasis, targetPosition);
+    const plan = unwind(engine.compute(inputs), targetPosition);
 
     // Execute one recapture per distinct exchange on the recovered loop path(s).
-    const recaptures: ExchangeRecapture[] = [];
-    for (const [exchange, { toQuantity }] of plan.recaptures) {
-        if (toQuantity <= 0n) continue;
-        recaptures.push(exchange.recapture(toQuantity, transactions));
-    }
+    const recaptures = executeRecaptures(plan, transactions);
 
     // Recovered basis = the reclaimed from-sides that land in the target position (the loop
     // ancestor edges). surfaceSettled = the outermost edges' to-sides settled in the surface
@@ -88,7 +83,7 @@ export function computeRecaptureResolution(
 
     // Residual-derived value among the consumed inputs is settled by the caller, not forward-exchanged.
     const residualNodes = plan.residualNodes;
-    const residualDerivedTotal = residualNodes.reduce((sum, n) => sum + n.quantity, 0n);
+    const residualDerivedTotal = residualNodes.reduce((sum: bigint, n: ResidualPath) => sum + n.quantity, 0n);
     const residualDerivedProceeds = totalConsumed > 0n ? scaledProceeds * residualDerivedTotal / totalConsumed : 0n;
 
     // The forward portion is whatever surface value neither looped nor came from a residual.
@@ -109,7 +104,7 @@ export function computeRecaptureResolution(
         const principalOrigin = new Map<Position, bigint>();
         for (const recapture of recaptures) {
             if (recapture.to.source.position !== targetPosition || recapture.to.quantity <= 0n) continue;
-            for (const [position, quantity] of collectOriginLeaves(engine.compute(recapture.to.source, recapture.to.quantity)))
+            for (const [position, quantity] of collectOriginLeaves(engine.compute([recapture.to])))
                 principalOrigin.set(position, (principalOrigin.get(position) ?? 0n) + quantity);
         }
         const magnitude = residualQuantity < 0n ? -residualQuantity : residualQuantity;

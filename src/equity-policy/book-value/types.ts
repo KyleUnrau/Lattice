@@ -1,6 +1,5 @@
 import type { Exchange, ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js"
 import type { Position } from "../../ledger-kernel/positions.js";
-import type { BookValueEngine } from "./engine.js";
 
 /** A node in the cost basis tree returned by {@link BookValueEngine.compute}. */
 export type BasisPath = OriginPath | ExchangePath | ResidualPath;

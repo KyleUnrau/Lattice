@@ -16,25 +16,46 @@ export class BookValueEngine {
     constructor(private readonly transactions: Transaction[]) {}
 
     /**
-     * Computes the basis paths for `quantity` units of `utxo`, tracing backwards through
-     * the transaction graph until every branch reaches an origin input. Returns one
-     * {@link BasisPath} leaf per distinct lineage — exchange paths, residual paths, and origin paths.
+     * Computes the basis paths for a set of consumed `inputs`, tracing each consumed UTXO
+     * backwards through the transaction graph until every branch reaches an origin input.
+     * Non-consumption inputs (origin UTXIs, exchange inputs) carry no consumable lineage and
+     * are ignored. Returns one {@link BasisPath} leaf per distinct lineage — exchange paths,
+     * residual paths, and origin paths.
+     *
+     * @param inputs - The inputs being consumed, typically a transaction's input array.
+     */
+    public compute(inputs: Input[]): BasisPath[] {
+        const consumedUTXOs = this.consumedUTXOsFromInputs(inputs);
+
+        return consumedUTXOs.flatMap(({ source, quantity }) => this.traceUTXO(source, quantity));
+    }
+
+    /**
+     * Computes the basis paths for `quantity` units of a single `utxo`, tracing backwards
+     * through the transaction graph until every branch reaches an origin input.
      *
      * @param utxo - The output whose basis is being traced.
      * @param quantity - Portion of `utxo` to trace; must be positive and ≤ `utxo.quantity`.
      */
-    public compute(utxo: UTXO, quantity: bigint): BasisPath[] {
-        if (quantity <= 0n) throw new Error(`quantity must be positive, got ${quantity}`);
-        if (quantity > utxo.quantity) throw new Error(`quantity ${quantity} exceeds utxo.quantity ${utxo.quantity}`);
-        return this.traceUTXO(utxo, quantity, new Set<UTXO>());
+    private traceUTXO(utxo: UTXO, quantity: bigint): BasisPath[] {
+        return this.traceUTXOFrom(utxo, quantity, new Set());
+    }
+
+    /** Decomposes a mixed input array into the {@link UTXOConsumption} `{ source, quantity }` pairs the basis trace operates on. */
+    private consumedUTXOsFromInputs(inputs: Input[]): { source: UTXO; quantity: bigint }[] {
+        return inputs.filter((i): i is UTXOConsumption => i instanceof UTXOConsumption)
+            .map(c => ({ source: c.source, quantity: c.quantity }));
     }
 
     /**
      * Finds the transaction that produced `utxo` and proportionally attributes `quantity`
      * to each of its inputs by the fraction `quantity / totalOutputQty`, then recurses
-     * via {@link traceInput}.
+     * via {@link traceInput}. `visited` guards against cycles in the traversal path.
      */
-    private traceUTXO(utxo: UTXO, quantity: bigint, visited: Set<UTXO> = new Set()): BasisPath[] {
+    private traceUTXOFrom(utxo: UTXO, quantity: bigint, visited: Set<UTXO>): BasisPath[] {
+        if (quantity <= 0n) throw new Error(`quantity must be positive, got ${quantity}`);
+        if (quantity > utxo.quantity) throw new Error(`quantity ${quantity} exceeds utxo.quantity ${utxo.quantity}`);
+
         if (visited.has(utxo)) throw new Error(`Cycle detected: UTXO encountered twice in traversal path`);
 
         const nextVisited = new Set(visited);
@@ -61,15 +82,15 @@ export class BookValueEngine {
      * - {@link ResidualUTXI} — emits a {@link ResidualPath} and recurses into the exchange's from-side
      * - {@link UTXI} — emits an {@link OriginPath}, terminating the branch
      */
-    private traceInput(input: Input, quantity: bigint, visited: Set<UTXO> = new Set()): BasisPath[] {
+    private traceInput(input: Input, quantity: bigint, visited: Set<UTXO>): BasisPath[] {
         if (input instanceof UTXOConsumption) {
-            return this.traceUTXO(input.source, quantity, visited);
+            return this.traceUTXOFrom(input.source, quantity, visited);
         }
 
         if (input instanceof ExchangedUTXI) {
             const ex = input.exchange;
             const fromQty = quantity * ex.from.quantity / ex.to.quantity;
-            const basis = this.traceUTXO(ex.from, fromQty, visited);
+            const basis = this.traceUTXOFrom(ex.from, fromQty, visited);
             return [{ type: "exchange", exchange: ex, quantity, fromQuantity: fromQty, basis } satisfies ExchangePath];
         }
 

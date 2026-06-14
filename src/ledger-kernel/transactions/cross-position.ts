@@ -1,6 +1,7 @@
-import type { ExchangeRecapture } from "../../equity-policy/exchange.js";
+import type { ExchangeRecapture } from "../../equity-policy/exchange/types.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
+import type { ResidualAccount } from "../accounts/computed.js";
 import { UTXI } from "./inputs.js";
 import { UTXO } from "./outputs.js";
 
@@ -75,8 +76,9 @@ export class ExchangedUTXI extends UTXI {
 
 /**
  * A loss (shortfall) relative to an exchange's locked rate, recognized in the surface position.
- * Placed in a transaction's outputs. Ownership (which {@link ResidualAccount} this belongs to) is
- * tracked by the account itself, not by this primitive.
+ * Placed in a transaction's outputs. The owning {@link ResidualAccount} that minted this lot is
+ * referenced by {@link account}, so a later settlement can re-recognize the deferred equity within
+ * the same account it originated in rather than an arbitrary one.
  *
  * `originBasis` records the origin-position composition (e.g. `{BTC: 0.0005}`) that this residual's
  * surface amount traces back to — the deferred equity it carries until settlement. The basis engine
@@ -89,14 +91,16 @@ export class ResidualUTXO extends UTXO {
     constructor(
         quantity: bigint,
         position: Position,
-        public readonly originBasis: Map<Position, bigint>
+        public readonly originBasis: Map<Position, bigint>,
+        public readonly account: ResidualAccount
     ) { super(quantity, position); }
 }
 
 /**
  * A gain (surplus) relative to an exchange's locked rate, recognized in the surface position.
- * Placed in a transaction's inputs. Ownership (which {@link ResidualAccount} this belongs to) is
- * tracked by the account itself, not by this primitive.
+ * Placed in a transaction's inputs. The owning {@link ResidualAccount} that minted this lot is
+ * referenced by {@link account}, so a later settlement can re-recognize the deferred equity within
+ * the same account it originated in rather than an arbitrary one.
  *
  * `originBasis` records the origin-position composition (e.g. `{BTC: 0.0005}`) that this residual's
  * surface amount traces back to — the deferred equity it carries until settlement. The basis engine
@@ -109,6 +113,7 @@ export class ResidualUTXI extends UTXI {
     constructor(
         quantity: bigint,
         position: Position,
-        public readonly originBasis: Map<Position, bigint>
+        public readonly originBasis: Map<Position, bigint>,
+        public readonly account: ResidualAccount
     ) { super(quantity, position); }
 }

@@ -1,10 +1,15 @@
 # Cost Basis Engine
 
-The `BookValueEngine` answers: *"Where did this value come from?"* for any `UTXO` and quantity. It performs backward traversal through the UTXI/UTXO consumption graph, crossing exchange boundaries, to produce a structured `BasisPath[]` tree.
+The `BookValueEngine` answers: *"Where did this value come from?"* for a set of consumed inputs. It performs backward traversal through the UTXI/UTXO consumption graph, crossing exchange boundaries, to produce a structured `BasisPath[]` tree. `compute(inputs)` is the sole public entry point — internally it decomposes the inputs into the consumed UTXOs and traces each.
 
 ```ts
 const engine = new BookValueEngine(ledger.transactions);
-const paths  = engine.compute(someUTXO, quantity);
+
+// Trace the basis of a transaction's consumed inputs.
+const paths = engine.compute(inputs);
+
+// To inspect a single output, wrap it in a UTXOConsumption.
+const single = engine.compute([new UTXOConsumption(quantity, someUTXO)]);
 ```
 
 ---
@@ -64,7 +69,7 @@ The engine is called by the equity-policy layer, not directly in most user code:
 
 - `ExchangeResolution` calls it via `computeRecaptureResolution` to decide which prior exchanges to recapture when a swap closes a loop
 - `expense()` calls it to trace the full lineage of consumed value, recapturing every edge
-- The REPL exposes `engine.compute(utxo, quantity)` directly for inspection
+- The REPL exposes `engine.compute(inputs)` directly for inspection
 
 ---
 

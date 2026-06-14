@@ -1,42 +1,49 @@
-import type { ResidualAccount } from "../ledger-kernel/accounts.js";
-import type { BookValueEngine } from "./book-value/engine.js";
-import type { Position } from "../ledger-kernel/positions.js";
-import type { Transaction } from "../ledger-kernel/transactions.js";
-import { Exchange, ResidualUTXI, ResidualUTXO } from "../ledger-kernel/transactions/cross-position.js";
-import type { Input, UTXOConsumption } from "../ledger-kernel/transactions/inputs.js";
-import type { Output, UTXIConsumption } from "../ledger-kernel/transactions/outputs.js";
+import type { BookValueEngine } from "../book-value/engine.js";
+import type { Position } from "../../ledger-kernel/positions.js";
+import type { Transaction } from "../../ledger-kernel/transactions.js";
+import { Exchange, ResidualUTXI, ResidualUTXO } from "../../ledger-kernel/transactions/cross-position.js";
+import type { Input } from "../../ledger-kernel/transactions/inputs.js";
+import type { Output } from "../../ledger-kernel/transactions/outputs.js";
 import { computeRecaptureResolution } from "./recapture.js";
-import { consumedUTXOsFromInputs } from "./utils.js";
-
-/** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
-export interface ExchangeRecapture {
-    /** {@link UTXIConsumption} settling the to-side of the original exchange. Goes in a transaction's outputs. */
-    from: UTXIConsumption;
-    /** {@link UTXOConsumption} reclaiming the from-side of the original exchange. Goes in a transaction's inputs. */
-    to: UTXOConsumption;
-}
+import { classifyRecaptures } from "../recaptures.js";
+import { ExchangePositionsAccount } from "../../ledger-kernel/accounts/computed.js";
+import { type ExchangeRecapture, type HopTransaction, type ResidualTarget, gainAccountOf, lossAccountOf } from "./types.js";
 
 type RecaptureResolution = ReturnType<typeof computeRecaptureResolution>;
 
-/** A single-position settlement transaction emitted as part of a multi-hop unwind. */
-export interface HopTransaction {
-    position: Position;
-    inputs: Input[];
-    outputs: Output[];
-}
-
 /**
- * Records an exchange of inputs into `targetPosition` and resolves all basis-tracking work.
+ * The exchange-resolution layer: resolves **the portion of consumed value that is actually being
+ * exchanged** into `targetPosition` and produces the kernel lines needed to record it, *without*
+ * constructing or committing any transaction. The caller owns transaction assembly and may surround
+ * these lines with unrelated deposits, withdrawals, fees, or adjustments (see the composition rules
+ * below). This is the building block beneath the high-level {@link swap} helper.
  *
- * The consumed value's full provenance is unwound (see {@link computeRecaptureResolution}):
+ * Pass only the {@link Input}s that represent the exchanged portion as `exchangedInputs`. If a
+ * single draw is split between an exchange and some other effect (e.g. exchange 400 of a 500 CAD
+ * draw, withdraw the other 100), pass only the 400-CAD consumptions here and record the 100-CAD
+ * withdrawal in its own transaction. `actualProceeds` is the `targetPosition` amount received for
+ * exactly that exchanged portion.
+ *
+ * The exchanged portion's full provenance is unwound (see {@link computeRecaptureResolution}):
  * where the lineage loops back to `targetPosition`, **every** exchange edge on the path is
  * recaptured at its locked rate; where it does not loop, the portion opens a forward exchange
- * that carries provenance onward. A recovered loop spanning multiple positions settles through a
- * chain of single-position transactions threaded by {@link Exchange.recapture}.
+ * (scoped to `exchangeAccount`, which is then **required** — see {@link forwardExchange}) that
+ * carries provenance onward. A recovered loop spanning multiple positions settles through a chain
+ * of single-position transactions threaded by {@link Exchange.recapture}.
  *
  * Build the entry arrays via {@link getFromOutputs} (the consuming/surface transaction's outputs),
  * {@link getToInputs} / {@link getToOutputs} (the receiving/target transaction), and
  * {@link getIntermediateTransactions} (the per-position hop transactions for a deep loop).
+ *
+ * **Composition rules.** Every exchange line produced here links *only* the exchanged portion: the
+ * from-side outputs sum to exactly `sum(exchangedInputs)` and the to-side inputs balance exactly
+ * against `actualProceeds`. So you may freely build other, independent transactions in the same
+ * business event. You may also add extra lines to the consuming/receiving transactions themselves,
+ * but only when they form a **uniform blend** with the exchange lines — the {@link BookValueEngine}
+ * attributes every input's basis across all of a transaction's outputs proportionally, so an
+ * *independent* sub-flow (a fee with its own input→output correspondence) must be a **separate
+ * transaction**, or its lineage will bleed into the exchanged value. When in doubt, keep unrelated
+ * effects in their own transactions.
  */
 export class ExchangeResolution {
     /** One recapture per distinct prior exchange on the recovered loop path(s); may span positions. */
@@ -54,60 +61,65 @@ export class ExchangeResolution {
     private readonly targetPosition: Position;
 
     constructor(
-        inputs: Input[],
+        exchangedInputs: Input[],
         targetPosition: Position,
         actualProceeds: number,
         engine: BookValueEngine,
         transactions: Transaction[],
-        residualAccount: ResidualAccount
+        residualAccount: ResidualTarget,
+        exchangeAccount: ExchangePositionsAccount
     ) {
-        const consumedUTXOs = consumedUTXOsFromInputs(inputs);
-        const resolution = computeRecaptureResolution(consumedUTXOs, targetPosition, actualProceeds, engine, transactions);
+        const resolution = computeRecaptureResolution(exchangedInputs, targetPosition, actualProceeds, engine, transactions);
 
         this.surfacePosition = resolution.surfacePosition;
         this.targetPosition = targetPosition;
         this.recaptures = resolution.recaptures;
-        this.exchange = this.forwardExchange(resolution, resolution.surfacePosition, targetPosition);
+        this.exchange = this.forwardExchange(resolution, resolution.surfacePosition, targetPosition, exchangeAccount);
         this.residuals = this.resolveResidual(resolution, targetPosition, residualAccount);
 
-        const nodeResult = this.settleResidualNodes(resolution, targetPosition, transactions, residualAccount);
+        const nodeResult = this.settleResidualNodes(resolution, targetPosition, transactions);
         this.residualCloseOutputs = nodeResult.closeOutputs;
         this.residualMintInputs = nodeResult.mintInputs;
     }
 
     // Forward exchange only for the portion that did not loop back to the target. Creates suspended
     // cost basis at the actual market rate, carrying the consumed value's provenance onward.
-    private forwardExchange(resolution: RecaptureResolution, sourcePosition: Position, targetPosition: Position): Exchange | null {
+    // Tagging with `exchangeAccount` scopes this exchange to that account's open-position view.
+    // `exchangeAccount` is always supplied by callers (required in the constructor); when the
+    // exchange fully closes a loop and newExchangeToQuantity is zero, it is simply not used.
+    private forwardExchange(resolution: RecaptureResolution, sourcePosition: Position, targetPosition: Position, exchangeAccount: ExchangePositionsAccount): Exchange | null {
         if (resolution.newExchangeToQuantity <= 0n) return null;
         return new Exchange(
             { quantity: resolution.newExchangeToQuantity, position: sourcePosition },
-            { quantity: resolution.newExchangeFromQuantity, position: targetPosition }
+            { quantity: resolution.newExchangeFromQuantity, position: targetPosition },
+            exchangeAccount
         );
     }
 
     // Gain and loss are recognized symmetrically in the target position as residual lots carrying
     // the recovered loop's deep-origin basis: a gain is a target-side input, a loss a target-side
-    // output. Either way the residual lot is registered in `residualAccount` and recognized
-    // immediately, and balances the target transaction by construction.
+    // output. Either way the residual lot is recognized immediately and balances the target
+    // transaction by construction. Gains and losses route to their respective accounts via `target`.
     private resolveResidual(
         resolution: RecaptureResolution,
         targetPosition: Position,
-        residualAccount: ResidualAccount
+        target: ResidualTarget
     ): (ResidualUTXI | ResidualUTXO)[] {
         if (resolution.residualQuantity > 0n)
-            return [residualAccount.addResidualInput(resolution.residualQuantity, targetPosition, resolution.residualOriginBasis)];
+            return [gainAccountOf(target).addResidualInput(resolution.residualQuantity, targetPosition, resolution.residualOriginBasis)];
         if (resolution.residualQuantity < 0n)
-            return [residualAccount.addResidualOutput(-resolution.residualQuantity, targetPosition, resolution.residualOriginBasis)];
+            return [lossAccountOf(target).addResidualOutput(-resolution.residualQuantity, targetPosition, resolution.residualOriginBasis)];
         return [];
     }
 
     // Residual-derived value among the consumed inputs: close each open residual leg and mint a new
-    // gain in the destination position, re-denominating deferred equity when the residual closes the loop.
+    // gain in the destination position, re-denominating deferred equity when the residual closes the
+    // loop. The mint lands in the residual's *own* account (read off `node.residual.account`), so a
+    // residual's equity is realized in the account that deferred it rather than an arbitrary one.
     private settleResidualNodes(
         resolution: RecaptureResolution,
         targetPosition: Position,
-        transactions: Transaction[],
-        residualAccount: ResidualAccount
+        transactions: Transaction[]
     ): { closeOutputs: Output[]; mintInputs: Input[]; } {
         if (resolution.residualNodes.length === 0) return { closeOutputs: [], mintInputs: [] };
 
@@ -125,7 +137,7 @@ export class ExchangeResolution {
                 : resolution.residualDerivedProceeds * node.quantity / totalResidual;
             allocated += share;
             if (share > 0n)
-                mintInputs.push(residualAccount.addResidualInput(share, targetPosition, new Map([[targetPosition, share]])));
+                mintInputs.push(node.residual.account.addResidualInput(share, targetPosition, new Map([[targetPosition, share]])));
         }
 
         return { closeOutputs, mintInputs };
@@ -162,20 +174,6 @@ export class ExchangeResolution {
      * Commit these (in array order) between the consuming and receiving transactions.
      */
     public getIntermediateTransactions(): HopTransaction[] {
-        const byPosition = new Map<Position, HopTransaction>();
-        const bucket = (position: Position): HopTransaction => {
-            let entry = byPosition.get(position);
-            if (!entry) { entry = { position, inputs: [], outputs: [] }; byPosition.set(position, entry); }
-            return entry;
-        };
-
-        for (const recapture of this.recaptures) {
-            const toPos = recapture.from.source.position;   // settling this edge's to-side
-            const fromPos = recapture.to.source.position;   // reclaiming this edge's from-side
-            if (toPos !== this.surfacePosition && toPos !== this.targetPosition) bucket(toPos).outputs.push(recapture.from);
-            if (fromPos !== this.surfacePosition && fromPos !== this.targetPosition) bucket(fromPos).inputs.push(recapture.to);
-        }
-
-        return [...byPosition.values()];
+        return classifyRecaptures(this.recaptures, this.surfacePosition).hops;
     }
 }
