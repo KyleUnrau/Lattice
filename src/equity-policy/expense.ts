@@ -55,7 +55,7 @@ export class ExpenseResolution {
     getFromOutputs(account: Account, transactions: Transaction[]): Output[] {
         return [
             ...this.surfaceRecaptureSettlements,
-            ...this.originAmounts.flatMap(o => account.getEngine(o.position).generateOutputsRaw(o.quantity, transactions)),
+            ...this.originAmounts.flatMap(o => account.getLotStore(o.position).generateOutputsRaw(o.quantity, transactions)),
             ...this.residualCloseOutputs,
         ];
     }
@@ -68,12 +68,12 @@ export class ExpenseResolution {
     getExpenseEntries(account: Account, transactions: Transaction[]): { inputs: Input[]; outputs: Output[] }[] {
         return [
             ...this.recaptureGroups.map(group => ({
-                inputs: group.recaptures.map(r => r.to),
-                outputs: account.getEngine(group.position).generateOutputsRaw(group.totalQuantity, transactions),
+                inputs: group.recaptures.map(r => r.reclaim),
+                outputs: account.getLotStore(group.position).generateOutputsRaw(group.totalQuantity, transactions),
             })),
             ...this.residualRecognitions.map(r => ({
                 inputs: [r.gainLot] as Input[],
-                outputs: account.getEngine(r.position).generateOutputsRaw(r.quantity, transactions),
+                outputs: account.getLotStore(r.position).generateOutputsRaw(r.quantity, transactions),
             })),
         ];
     }
@@ -126,7 +126,7 @@ export function expense(
     const recaptureGroups: ExpenseRecaptureGroup[] = [...terminalReclaims].map(([position, group]) => ({
         position,
         recaptures: group,
-        totalQuantity: group.reduce((s, r) => s + r.to.quantity, 0n),
+        totalQuantity: group.reduce((s, r) => s + r.reclaim.quantity, 0n),
     }));
     const surfaceSettled = surfaceSettlements.reduce((s, o) => s + o.quantity, 0n);
 

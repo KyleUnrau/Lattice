@@ -7,11 +7,12 @@ import { UTXO, type Output, type UTXIConsumption } from "../transactions/outputs
 
 /**
  * Per-position lot store for a single {@link Account}. Holds the raw {@link UTXO} and
- * {@link UTXI} lists and implements the generation logic using the account's configured
- * {@link DisposalMethod}s. Not instantiated directly — created on demand by `Account.getEngine`.
+ * {@link UTXI} lists and implements the input/output generation logic using the account's
+ * configured {@link DisposalMethod}s. Not instantiated directly — created on demand by
+ * `Account.getLotStore`.
  */
 
-export class AccountEngine {
+export class PositionLotStore {
     public readonly utxos: UTXO[] = [];
     public readonly utxis: UTXI[] = [];
 
@@ -79,10 +80,10 @@ export class AccountEngine {
         } else return consumptions;
     }
 
-    public getRootBalance(transactions: Transaction[]): bigint {
-        let rootBalance = 0n;
-        for (const utxi of this.utxis) if (utxi.isCommitted(transactions)) rootBalance -= utxi.calculateAvailable(transactions);
-        for (const utxo of this.utxos) if (utxo.isCommitted(transactions)) rootBalance += utxo.calculateAvailable(transactions);
-        return rootBalance;
+    public getSignedBalanceScaled(transactions: Transaction[]): bigint {
+        let balance = 0n;
+        for (const utxi of this.utxis) if (utxi.isCommitted(transactions)) balance -= utxi.calculateAvailable(transactions);
+        for (const utxo of this.utxos) if (utxo.isCommitted(transactions)) balance += utxo.calculateAvailable(transactions);
+        return balance;
     }
 }

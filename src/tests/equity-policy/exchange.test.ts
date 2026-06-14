@@ -6,8 +6,8 @@ import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { makeFixture, openInto, commitSwap } from "../utils/ledger-fixture.js";
 
 // Helper: the open-position balance an ExchangePositionsAccount reports for a position.
-function openBalance(account: { getRootRawBalance(p: any, t: any): bigint }, position: any, transactions: any): bigint {
-    return account.getRootRawBalance(position, transactions);
+function openBalance(account: { getSignedBalanceScaled(p: any, t: any): bigint }, position: any, transactions: any): bigint {
+    return account.getSignedBalanceScaled(position, transactions);
 }
 
 test("forward exchange links only the exchanged portion and the ledger stays balanced", () => {
@@ -29,7 +29,7 @@ test("forward exchange links only the exchanged portion and the ledger stays bal
     assert.equal(openBalance(f.usdToOranges, f.cad, f.ledger.transactions), 0n);
 
     // No gain/loss yet — the value is suspended in the forward exchange.
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), 0n);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n);
 
     // Asset balances reflect the partial conversion.
     assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 500);
@@ -56,7 +56,7 @@ test("a closed loop recaptures every edge, recognizes the gain, and leaves no st
     }
 
     // 100 CAD gain recognized (equity, negative root balance).
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), -10000n);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -10000n);
 
     // Cash: 500 CAD left over from phase 1 + 600 CAD proceeds = 1100 CAD; oranges fully sold.
     assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 1100);
@@ -115,7 +115,7 @@ test("a partial exchange resolves only its portion; the rest is an independent t
     assert.equal(f.drawings.getBalance(f.cad, f.ledger.transactions), 100);
 
     // The exchanged USD's basis traces purely to the CAD origin — the withdrawal did not bleed in.
-    const usdUtxo = f.cash.getEngine(f.usd).utxos.find(u => u.calculateAvailable(f.ledger.transactions) > 0n)!;
+    const usdUtxo = f.cash.getLotStore(f.usd).utxos.find(u => u.calculateAvailable(f.ledger.transactions) > 0n)!;
     const leaves = collectOriginLeaves(f.engine.compute([new UTXOConsumption(usdUtxo.quantity, usdUtxo)]));
     assert.deepEqual([...leaves.keys()], [f.cad]);
     assert.equal(leaves.get(f.cad), 40000n);

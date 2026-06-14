@@ -43,32 +43,32 @@ export function makeFixture(): Fixture {
     const btc: Position = { name: "Bitcoin", decimals: 8 };
 
     const netAssets = new AccountFolder("Net Assets", Orientation.Positive);
-    const netWorth = new AccountFolder("Net Worth", Orientation.Negative);
-    const ledger = new Ledger(netAssets, netWorth);
+    const equity = new AccountFolder("Net Worth", Orientation.Negative);
+    const ledger = new Ledger(netAssets, equity);
     const engine = new BookValueEngine(ledger.transactions);
 
     const assets = netAssets.addFolder("Assets", Orientation.Positive);
     const currentAssets = assets.addFolder("Current Assets", Orientation.Positive);
-    const netIncome = netWorth.addFolder("Net Income", Orientation.Positive);
+    const netIncome = equity.addFolder("Net Income", Orientation.Positive);
     const expenses = netIncome.addFolder("Expenses", Orientation.Negative);
 
     const cash = currentAssets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const inventory = currentAssets.addAccount("Inventory", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const wallet = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-    const openingBalance = netWorth.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-    const drawings = netWorth.addAccount("Drawings", Orientation.Negative, fifo<UTXO>, fifo<UTXI>);
+    const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+    const drawings = equity.addAccount("Drawings", Orientation.Negative, fifo<UTXO>, fifo<UTXI>);
     const exchangeExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 
     const netCapitalGains = netIncome.addFolder("Net Capital Gains (Losses)", Orientation.Positive);
     const capitalGains = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
     const capitalLosses = netCapitalGains.addResidualAccount("Capital Loss", Orientation.Negative);
 
-    const cadToUsd = netWorth.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
-    const usdToOranges = netWorth.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
-    const orangesToCad = netWorth.addExchangeAccount("Transfers Oranges→CAD", Orientation.Positive);
-    const btcToCad = netWorth.addExchangeAccount("Transfers BTC→CAD", Orientation.Positive);
-    const usdToCad = netWorth.addExchangeAccount("Transfers USD→CAD", Orientation.Positive);
-    const cadToBtc = netWorth.addExchangeAccount("Transfers CAD→BTC", Orientation.Positive);
+    const cadToUsd = equity.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
+    const usdToOranges = equity.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
+    const orangesToCad = equity.addExchangeAccount("Transfers Oranges→CAD", Orientation.Positive);
+    const btcToCad = equity.addExchangeAccount("Transfers BTC→CAD", Orientation.Positive);
+    const usdToCad = equity.addExchangeAccount("Transfers USD→CAD", Orientation.Positive);
+    const cadToBtc = equity.addExchangeAccount("Transfers CAD→BTC", Orientation.Positive);
 
     return { cad, usd, oranges, btc, ledger, engine, cash, inventory, wallet, drawings, openingBalance, exchangeExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad, btcToCad, usdToCad, cadToBtc };
 }

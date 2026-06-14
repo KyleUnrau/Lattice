@@ -31,8 +31,8 @@ test("expensing forward-exchanged value recaptures the edge and recognizes the b
     assert.equal(f.exchangeExpense.getBalance(f.cad, f.ledger.transactions), 500);
 
     // The recaptured exchange nets to zero — no stale open positions.
-    assert.equal(f.cadToUsd.getRootRawBalance(f.cad, f.ledger.transactions), 0n);
-    assert.equal(f.cadToUsd.getRootRawBalance(f.usd, f.ledger.transactions), 0n);
+    assert.equal(f.cadToUsd.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n);
+    assert.equal(f.cadToUsd.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n);
 });
 
 test("expensing multi-hop value threads intermediate positions through hop transactions", () => {
@@ -53,8 +53,8 @@ test("expensing multi-hop value threads intermediate positions through hop trans
 
     // Both exchanges net to zero across every position — the USD hop cancelled out.
     for (const position of [f.cad, f.usd, f.oranges]) {
-        assert.equal(f.cadToUsd.getRootRawBalance(position, f.ledger.transactions), 0n, `cadToUsd ${position.name}`);
-        assert.equal(f.usdToOranges.getRootRawBalance(position, f.ledger.transactions), 0n, `usdToOranges ${position.name}`);
+        assert.equal(f.cadToUsd.getSignedBalanceScaled(position, f.ledger.transactions), 0n, `cadToUsd ${position.name}`);
+        assert.equal(f.usdToOranges.getSignedBalanceScaled(position, f.ledger.transactions), 0n, `usdToOranges ${position.name}`);
     }
 });
 
@@ -90,8 +90,8 @@ test("expensing residual-derived value closes the residual leg and recognizes it
     assert.equal(f.exchangeExpense.getBalance(f.cad, f.ledger.transactions), 0, "nothing expensed in CAD");
 
     // The provisional CAD gain is reversed and surfaces in BTC; the BTC→CAD path is fully recaptured.
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), 0n, "provisional CAD gain reversed");
-    assert.equal(f.capitalGains.getRootRawBalance(f.btc, f.ledger.transactions), -100000n, "0.001 BTC gain realized");
-    assert.equal(f.btcToCad.getRootRawBalance(f.btc, f.ledger.transactions), 0n, "BTC→CAD settled");
-    assert.equal(f.btcToCad.getRootRawBalance(f.cad, f.ledger.transactions), 0n);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "provisional CAD gain reversed");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.btc, f.ledger.transactions), -100000n, "0.001 BTC gain realized");
+    assert.equal(f.btcToCad.getSignedBalanceScaled(f.btc, f.ledger.transactions), 0n, "BTC→CAD settled");
+    assert.equal(f.btcToCad.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n);
 });

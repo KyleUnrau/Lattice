@@ -37,7 +37,7 @@ The boundary is enforced by dependency direction: `equity-policy/` imports from 
 Concretely:
 
 - **Kernel**: `positions.ts`, `transactions.ts`, `ledger.ts`, `accounts/`, `transactions/`, `disposal-methods/`
-- **Equity-policy**: `book-value/`, `lineage.ts`, `recapture.ts`, `exchange.ts`, `expense.ts`, `swap.ts`, `utils.ts`
+- **Equity-policy**: `book-value/` (engine, lineage, types), `exchange/` (resolution, recapture, swap, types, index), `recaptures.ts`, `expense.ts`
 
 ---
 

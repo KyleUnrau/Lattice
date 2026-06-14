@@ -37,17 +37,18 @@ export class Exchange {
 
     /**
      * Partially or fully unwinds this exchange at its original locked rate.
-     * `recapture.from` is a {@link UTXIConsumption} that settles part of `.to`;
-     * `recapture.to` is a {@link UTXOConsumption} that reclaims the corresponding part of `.from`.
+     * `recapture.settlement` is a {@link UTXIConsumption} that settles part of the to-side (`.to`);
+     * `recapture.reclaim` is a {@link UTXOConsumption} that reclaims the corresponding part of the
+     * from-side (`.from`).
      *
      * @param quantity - Amount of the to-side to recapture; must not exceed remaining availability.
      */
     public recapture(quantity: bigint, transactions: Transaction[]): ExchangeRecapture {
-        const toQuantity: bigint = this.from.quantity * quantity / this.to.quantity;
+        const fromQuantity: bigint = this.from.quantity * quantity / this.to.quantity;
 
         return {
-            from: this.to.consume(quantity, transactions),
-            to: this.from.consume(toQuantity, transactions)
+            settlement: this.to.consume(quantity, transactions),
+            reclaim: this.from.consume(fromQuantity, transactions)
         };
     }
 }

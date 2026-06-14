@@ -69,44 +69,44 @@ export class AccountFolder implements AccountNode {
         return folder;
     }
 
-    public getRootOrientation(): Orientation {
+    public getEffectiveOrientation(): Orientation {
         if (this.parent === null) return this.localOrientation;
-        return this.parent.getRootOrientation() * this.localOrientation;
+        return this.parent.getEffectiveOrientation() * this.localOrientation;
     }
 
-    public getRootRawBalance(position: Position, transactions: Transaction[]): bigint {
+    public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         let sum = 0n;
-        for (const child of this.children) sum += child.getRootRawBalance(position, transactions);
+        for (const child of this.children) sum += child.getSignedBalanceScaled(position, transactions);
         return sum;
     }
 
-    public getRootRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
         for (const child of this.children) {
-            for (const [position, bal] of child.getRootRawBalances(transactions))
+            for (const [position, bal] of child.getSignedBalancesScaled(transactions))
                 result.set(position, (result.get(position) ?? 0n) + bal);
         }
         return result;
     }
 
-    public getRawBalance(position: Position, transactions: Transaction[]): bigint {
-        return BigInt(this.getRootOrientation()) * this.getRootRawBalance(position, transactions);
+    public getBalanceRaw(position: Position, transactions: Transaction[]): bigint {
+        return BigInt(this.getEffectiveOrientation()) * this.getSignedBalanceScaled(position, transactions);
     }
 
-    public getRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getBalancesRaw(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
-        for (const [position, rootBal] of this.getRootRawBalances(transactions))
-            result.set(position, BigInt(this.getRootOrientation()) * rootBal);
+        for (const [position, signed] of this.getSignedBalancesScaled(transactions))
+            result.set(position, BigInt(this.getEffectiveOrientation()) * signed);
         return result;
     }
 
     public getBalance(position: Position, transactions: Transaction[]): number {
-        return unscale(this.getRawBalance(position, transactions), position);
+        return unscale(this.getBalanceRaw(position, transactions), position);
     }
 
     public getBalances(transactions: Transaction[]): Map<Position, number> {
         const result = new Map<Position, number>();
-        for (const [pos, raw] of this.getRawBalances(transactions)) result.set(pos, unscale(raw, pos));
+        for (const [pos, raw] of this.getBalancesRaw(transactions)) result.set(pos, unscale(raw, pos));
         return result;
     }
 

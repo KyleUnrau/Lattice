@@ -46,24 +46,24 @@ export class Ledger {
      * adjustment is needed.
      */
     public verify(): Result<undefined, Error> {
-        const rootBalances = this.getRootBalances();
+        const signedBalances = this.getSignedBalancesScaled();
 
-        for (const [position, rootBalance] of rootBalances) {
-            if (rootBalance !== 0n) return {ok: false, error: new Error(`Ledger invalid, root balance for ${position.name} calculated as ${rootBalance} instead of 0`)};
+        for (const [position, balance] of signedBalances) {
+            if (balance !== 0n) return {ok: false, error: new Error(`Ledger invalid, root balance for ${position.name} calculated as ${balance} instead of 0`)};
         }
 
         return {ok: true, value: undefined};
     }
 
-    public getRootBalances(): Map<Position, bigint> {
-        const rootBalances = new Map<Position, bigint>();
+    public getSignedBalancesScaled(): Map<Position, bigint> {
+        const signedBalances = new Map<Position, bigint>();
 
-        for (const [position, rootBalance] of this.netAssets.getRootRawBalances(this.transactions))
-            rootBalances.set(position, rootBalance + (rootBalances.get(position) ?? 0n));
-        for (const [position, rootBalance] of this.equity.getRootRawBalances(this.transactions))
-            rootBalances.set(position, rootBalance + (rootBalances.get(position) ?? 0n));
+        for (const [position, balance] of this.netAssets.getSignedBalancesScaled(this.transactions))
+            signedBalances.set(position, balance + (signedBalances.get(position) ?? 0n));
+        for (const [position, balance] of this.equity.getSignedBalancesScaled(this.transactions))
+            signedBalances.set(position, balance + (signedBalances.get(position) ?? 0n));
 
-        return rootBalances;
+        return signedBalances;
     }
 
     public summarize(position: Position): LedgerSummary {

@@ -16,19 +16,22 @@ Net Assets (+)
 
 Net Worth (−)
   ├─ Opening Balance (+)
-  ├─ Transfers CAD→USD    [ExchangePositionsAccount, scoped] (+)
-  ├─ Transfers USD→Oranges [ExchangePositionsAccount, scoped] (+)
+  ├─ Transfers CAD→USD     [ExchangePositionsAccount, scoped] (+)
+  ├─ Transfers USD→Oranges  [ExchangePositionsAccount, scoped] (+)
+  ├─ Transfers Oranges→CAD  [ExchangePositionsAccount, scoped] (+)
   └─ Net Income (+)
-       ├─ Capital Gains [ResidualAccount, dual-name] (+)
+       ├─ Net Capital Gains (Losses) (+)
+       │    ├─ Capital Gains [ResidualAccount] (+)
+       │    └─ Capital Loss  [ResidualAccount] (−)
        └─ Expenses (−)
             └─ Exchange Expense (+)
 ```
 
 All positions use 2 decimal places (`decimals: 2`) except Oranges (`decimals: 0`, whole units).
 
-**Capital Gains** uses the dual-name feature: its `negativeLabel` is `"Capital Losses"`, so `summarize()` returns `"Capital Losses"` in any position where the balance is net-negative.
+Gains and losses route to **separate accounts** under a `Net Capital Gains (Losses)` folder: `capitalGains` (`+`) receives gain `ResidualUTXI` lots and `capitalLosses` (`−`) receives loss `ResidualUTXO` lots. The folder balance nets them. Each `swap()` passes `{ gain: capitalGains, loss: capitalLosses }` as `residualAccount`.
 
-**The two exchange accounts are scoped**: each `swap()` call passes `exchangeAccount` so its forward exchange is tagged exclusively to that account. Neither account tracks exchanges from the other direction.
+**The three exchange accounts are scoped**: each `swap()` call passes its own `exchangeAccount` so its forward exchange is tagged exclusively to that account. No account tracks exchanges from the other directions.
 
 ---
 
@@ -54,22 +57,25 @@ A plain 1000 CAD credit from the opening balance equity account into cash. No ex
 
 ```ts
 function phase1() {
-    return swap({
-        source: cash, from: cad, quantity: 500,
-        destination: cash, to: usd, proceeds: 375,
-        engine, ledger,
-        residualAccount: capitalGains,
+    const fromInputs = cash.generateInputs(cad, 500, ledger.transactions);
+    const toOutputs = cash.generateOutputs(usd, 375, ledger.transactions);
+    const result = swap({
+        fromInputs, toOutputs, engine,
+        transactions: ledger.transactions,
+        residualAccount: { gain: capitalGains, loss: capitalLosses },
         exchangeAccount: cadToUsdPositions
     });
+    ledger.newTransaction(fromInputs, result.fromOutputs);
+    ledger.addTransaction(...result.intermediates, result.to);
 }
 ```
 
 500 CAD is exchanged for 375 USD. The basis engine traces the 500 CAD to the phase 0 `UTXI` — a plain origin path with no prior exchange lineage in USD. Since there is no loop to recapture, the entire portion opens a **forward exchange** at the locked rate of 500 CAD / 375 USD. The forward exchange is tagged to `cadToUsdPositions`, so only that account tracks this open position.
 
-**Transactions committed (by `swap()`):**
+**Transactions committed (by the caller):**
 
-1. *Consuming:* `cash.generateInputs(cad, 500)` → `[exchange.from]` (ExchangedUTXO; 500 CAD given away)
-2. *Receiving:* `[exchange.to]` (ExchangedUTXI; 375 USD received) → `cash.generateOutputs(usd, 375)`
+1. *Consuming:* `fromInputs` → `result.fromOutputs` which includes `[exchange.from]` (ExchangedUTXO; 500 CAD given away)
+2. *Receiving:* `result.to` — inputs `[exchange.to]` (ExchangedUTXI; 375 USD received), outputs `toOutputs` (the UTXO in cash)
 
 No intermediate hop transactions (single exchange edge).
 
@@ -85,29 +91,32 @@ No intermediate hop transactions (single exchange edge).
 
 ```ts
 function phase2() {
-    return swap({
-        source: cash, from: usd, quantity: 375,
-        destination: inventory, to: oranges, proceeds: 1500,
-        engine, ledger,
-        residualAccount: capitalGains,
+    const fromInputs = cash.generateInputs(usd, 375, ledger.transactions);
+    const toOutputs = inventory.generateOutputs(oranges, 1500, ledger.transactions);
+    const result = swap({
+        fromInputs, toOutputs, engine,
+        transactions: ledger.transactions,
+        residualAccount: { gain: capitalGains, loss: capitalLosses },
         exchangeAccount: usdToOrangesPositions
     });
+    ledger.newTransaction(fromInputs, result.fromOutputs);
+    ledger.addTransaction(...result.intermediates, result.to);
 }
 ```
 
 375 USD is exchanged for 1500 Oranges. The engine traces the 375 USD to the phase 1 `ExchangedUTXI`. The target position is Oranges — there is no loop back to Oranges in the USD lineage — so again, the entire portion opens a **forward exchange** at 375 USD / 1500 Oranges. The locked rate for the phase 1 CAD→USD exchange is inherited: Oranges now carries provenance tracing back through USD to the original CAD basis. The forward exchange is tagged to `usdToOrangesPositions`.
 
-**Transactions committed:**
+**Transactions committed (by the caller):**
 
-1. *Consuming:* `cash.generateInputs(usd, 375)` → `[exchange2.from]` (ExchangedUTXO)
-2. *Receiving:* `[exchange2.to]` (ExchangedUTXI) → `inventory.generateOutputs(oranges, 1500)`
+1. *Consuming:* `fromInputs` → `result.fromOutputs` which includes `[exchange2.from]` (ExchangedUTXO)
+2. *Receiving:* `result.to` — inputs `[exchange2.to]` (ExchangedUTXI), outputs `toOutputs` (the UTXO in inventory)
 
 **Ledger state after phase 2:**
 - `cash`: 500 CAD
 - `inventory`: 1500 Oranges
 - `cadToUsdPositions`: +500 CAD, −375 USD (phase 1 exchange still open)
 - `usdToOrangesPositions`: +375 USD, −1500 Oranges (phase 2 exchange now open)
-- `capitalGains`: 0
+- `capitalGains` / `capitalLosses`: 0
 
 ---
 
@@ -115,17 +124,22 @@ function phase2() {
 
 ```ts
 function phase3(proceeds: number = 600) {
-    return swap({
-        source: inventory, from: oranges, quantity: 1500,
-        destination: cash, to: cad, proceeds,
-        engine, ledger, residualAccount: capitalGains
+    const fromInputs = inventory.generateInputs(oranges, 1500, ledger.transactions);
+    const toOutputs = cash.generateOutputs(cad, proceeds, ledger.transactions);
+    const result = swap({
+        fromInputs, toOutputs, engine,
+        transactions: ledger.transactions,
+        residualAccount: { gain: capitalGains, loss: capitalLosses },
+        exchangeAccount: orangesToCadPositions
     });
+    ledger.newTransaction(fromInputs, result.fromOutputs);
+    ledger.addTransaction(...result.intermediates, result.to);
 }
 ```
 
 1500 Oranges are sold for 600 CAD. The engine traces the Oranges to `exchange2.to` (an `ExchangedUTXI`), which traces further to `exchange2.from` (USD), which traces to `exchange1.to` (ExchangedUTXI), which traces to `exchange1.from` (CAD). **CAD is the target position** — the loop closes.
 
-Note that `exchangeAccount` is required and is supplied even here (`orangesToCadPositions`). Because the loop closes completely, no forward exchange opens and the account carries a zero balance — but it must still be provided.
+`exchangeAccount` is required and is supplied even here (`orangesToCadPositions`). Because the loop closes completely, no forward exchange opens and the account carries a zero balance — but it must still be provided.
 
 **Unwind plan (loop mode, `stopAt = cad`):**
 
@@ -140,15 +154,15 @@ The gain is recognized as a `ResidualUTXI` (100 CAD) registered in `capitalGains
 
 **Transactions committed (in dependency order):**
 
-1. *Consuming:* `inventory.generateInputs(oranges, 1500)` → `[recapture2.from, exchange1.from (exchange.from)]`
+Because both exchanges are fully looped, there is no forward exchange. `ExchangeResolution.exchange` is `null`. All consumed value loops back to CAD.
 
-   Wait — let me clarify: because both exchanges are fully looped, there is no forward exchange here. All consumed value loops back to CAD. `ExchangeResolution.exchange` is `null` (pure-loop case). The consuming transaction outputs include `recapture2.from` only (settling the Oranges→USD exchange's to-side).
+1. *Consuming:* `fromInputs` (1500 Oranges) → `result.fromOutputs`: `[recapture2.settlement]` (settling exchange2's to-side; 1500 Oranges)
 
-2. *Intermediate hop (USD):* Inputs `[recapture2.to]` (reclaim exchange2's from-side: 375 USD) → Outputs `[recapture1.from]` (settle exchange1's to-side: 375 USD). This transaction nets to zero in USD.
+2. *Intermediate hop (USD) — via `result.intermediates`:* Inputs `[recapture2.reclaim]` (reclaim exchange2's from-side: 375 USD) → Outputs `[recapture1.settlement]` (settle exchange1's to-side: 375 USD). Nets to zero in USD.
 
-3. *Receiving:* `[recapture1.to, residual]` → `cash.generateOutputs(cad, 600)`
-   - `recapture1.to`: reclaims exchange1's from-side (500 CAD)
-   - `residual` (ResidualUTXI, 100 CAD gain): registered in `capitalGains`
+3. *Receiving — `result.to`:* Inputs `[recapture1.reclaim, residual]` → Outputs `toOutputs` (600 CAD to cash)
+   - `recapture1.reclaim`: reclaims exchange1's from-side (500 CAD)
+   - `residual` (`ResidualUTXI`, 100 CAD gain): registered in `capitalGains`
    - Total inputs: 500 + 100 = 600 CAD ✓
 
 **Ledger state after phase 3:**
@@ -156,7 +170,9 @@ The gain is recognized as a `ResidualUTXI` (100 CAD) registered in `capitalGains
 - `inventory`: 0 Oranges
 - `cadToUsdPositions`: 0 for all positions (exchange settled)
 - `usdToOrangesPositions`: 0 for all positions (exchange settled)
-- `capitalGains`: −100 CAD root balance (gain reduces equity; `rootOrientation = −1`; `summarize()` returns `"Capital Gains"` since balance is net-negative-root which displays as positive)
+- `orangesToCadPositions`: 0 (loop fully closed; no forward exchange opened)
+- `capitalGains`: signed = −10000n (100.00 CAD gain as `ResidualUTXI`); oriented = +10000n (`effectiveOrientation = −1`); `getBalance(cad, ...)` = `100.00`
+- `capitalLosses`: 0 (no loss)
 
 ```
 > ledger.verify()
@@ -169,9 +185,9 @@ The gain is recognized as a `ResidualUTXI` (100 CAD) registered in `capitalGains
 
 `phase3()` accepts an optional proceeds override:
 
-- `phase3(500)` — break-even: cost basis = proceeds → no residual, `capitalGains` stays at 0
-- `phase3(450)` — loss: proceeds < cost basis → `ResidualUTXO` (loss) in `capitalGains`, positive root balance
-- `phase3(700)` — larger gain: residual = 200 CAD
+- `phase3(500)` — break-even: cost basis = proceeds → no residual; both `capitalGains` and `capitalLosses` stay at 0
+- `phase3(450)` — loss: proceeds < cost basis → `ResidualUTXO` (loss) registered in `capitalLosses`
+- `phase3(700)` — larger gain: `ResidualUTXI` (200 CAD) registered in `capitalGains`
 
 ---
 

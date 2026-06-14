@@ -25,19 +25,19 @@ const oranges: Position = { name: "Oranges", decimals: 0 };
 
 // Chart of accounts
 const netAssets: AccountFolder = new AccountFolder("Net Assets", Orientation.Positive);
-const netWorth: AccountFolder = new AccountFolder("Net Worth", Orientation.Negative);
-const ledger: Ledger = new Ledger(netAssets, netWorth);
+const equity: AccountFolder = new AccountFolder("Net Worth", Orientation.Negative);
+const ledger: Ledger = new Ledger(netAssets, equity);
 const engine = new BookValueEngine(ledger.transactions);
 
 const assets: AccountFolder = netAssets.addFolder("Assets", Orientation.Positive);
 const currentAssets: AccountFolder = assets.addFolder("Current Assets", Orientation.Positive);
-const netIncome: AccountFolder = netWorth.addFolder("Net Income", Orientation.Positive);
+const netIncome: AccountFolder = equity.addFolder("Net Income", Orientation.Positive);
 const expenses: AccountFolder = netIncome.addFolder("Expenses", Orientation.Negative);
 
 const cash: Account = currentAssets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 const inventory: Account = currentAssets.addAccount("Inventory", Orientation.Positive, fifo<UTXO>, fifo<UTXI>)
 const wallet: Account = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-const openingBalance: Account = netWorth.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+const openingBalance: Account = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 const exchangeExpense: Account = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 
 // Design A: dual-name — one account whose display name flips between "Capital Gains" and
@@ -54,9 +54,9 @@ const capitalLosses: ResidualAccount = netCapitalGains.addResidualAccount("Capit
 
 // Scoped exchange accounts — each swap is tagged to its own account so open positions are
 // classified by direction rather than merged into a single net figure.
-const cadToUsdPositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
-const usdToOrangesPositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
-const orangesToCadPositions: ExchangePositionsAccount = netWorth.addExchangeAccount("Transfers Oranges→CAD", Orientation.Positive);
+const cadToUsdPositions: ExchangePositionsAccount = equity.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
+const usdToOrangesPositions: ExchangePositionsAccount = equity.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
+const orangesToCadPositions: ExchangePositionsAccount = equity.addExchangeAccount("Transfers Oranges→CAD", Orientation.Positive);
 
 function phase0(): Transaction {
      const inputs = openingBalance.generateInputs(cad, 1000, ledger.transactions);
@@ -166,7 +166,7 @@ runCLI({
     cad,
     usd,
     netAssets,
-    netWorth,
+    equity,
     ledger,
     assets,
     currentAssets,

@@ -69,12 +69,13 @@ When consumed inputs include value that originated from a prior `ResidualUTXI` (
 
 ## Helper Functions
 
-| Function | Purpose |
-|---|---|
-| `unwind(basis, stopAt)` | Main entry point; returns `UnwindPlan` |
-| `groupRecapturesByExchange(edges)` | Aggregates `RecaptureEdge[]` by exchange instance |
-| `collectResidualNodes(basis)` | Finds all `ResidualPath` leaves in a basis tree |
-| `collectOriginLeaves(basis)` | Reduces a basis tree to its terminal origin-position composition |
+| Function | Exported | Purpose |
+|---|---|---|
+| `unwind(basis, stopAt)` | Yes | Main entry point; returns `UnwindPlan` |
+| `collectOriginLeaves(basis)` | Yes | Reduces a basis tree to its terminal origin-position composition |
+| `collectChainEdges(basis, stopAt)` | No (internal) | Recursive edge collector; loop vs full mode |
+| `groupRecapturesByExchange(edges)` | No (internal) | Aggregates `RecaptureEdge[]` by exchange instance |
+| `collectResidualNodes(basis)` | No (internal) | Finds all `ResidualPath` leaves in a basis tree |
 
 ---
 

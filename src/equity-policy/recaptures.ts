@@ -56,35 +56,35 @@ export interface RecaptureClassification {
  * Classifies `recaptures` by position relative to `surfacePosition`:
  *
  * - a recapture whose `from` settles in the surface position is a **surface settlement**;
- * - a position that is both *reclaimed* (some `recapture.to` lands there) and *settled*
- *   (some `recapture.from` lands there), other than the surface, is an **intermediate hop**
+ * - a position that is both *reclaimed* (some `recapture.reclaim` lands there) and *settled*
+ *   (some `recapture.settlement` lands there), other than the surface, is an **intermediate hop**
  *   whose inputs reclaim the inner edge and whose outputs settle the next — netting to zero;
  * - a position that is reclaimed but not settled is a **terminal reclaim** (an origin for a full
  *   unwind, the target for a loop closure).
  */
 export function classifyRecaptures(recaptures: ExchangeRecapture[], surfacePosition: Position): RecaptureClassification {
-    const reclaims = new Map<Position, ExchangeRecapture[]>(); // recapture.to reclaims value into this position
-    const settles = new Map<Position, ExchangeRecapture[]>();  // recapture.from settles value in this position
+    const reclaims = new Map<Position, ExchangeRecapture[]>(); // recapture.reclaim reclaims value into this position
+    const settles = new Map<Position, ExchangeRecapture[]>();  // recapture.settlement settles value in this position
     const add = (map: Map<Position, ExchangeRecapture[]>, position: Position, recapture: ExchangeRecapture): void => {
         const group = map.get(position);
         if (group) group.push(recapture);
         else map.set(position, [recapture]);
     };
     for (const recapture of recaptures) {
-        add(reclaims, recapture.to.source.position, recapture);
-        add(settles, recapture.from.source.position, recapture);
+        add(reclaims, recapture.reclaim.source.position, recapture);
+        add(settles, recapture.settlement.source.position, recapture);
     }
 
     const hops: HopTransaction[] = [];
     const terminalReclaims = new Map<Position, ExchangeRecapture[]>();
     for (const [position, group] of reclaims) {
         if (settles.has(position) && position !== surfacePosition) {
-            hops.push({ position, inputs: group.map(r => r.to), outputs: settles.get(position)!.map(r => r.from) });
+            hops.push({ position, inputs: group.map(r => r.reclaim), outputs: settles.get(position)!.map(r => r.settlement) });
         } else {
             terminalReclaims.set(position, group);
         }
     }
 
-    const surfaceSettlements = (settles.get(surfacePosition) ?? []).map(r => r.from);
+    const surfaceSettlements = (settles.get(surfacePosition) ?? []).map(r => r.settlement);
     return { surfaceSettlements, hops, terminalReclaims };
 }

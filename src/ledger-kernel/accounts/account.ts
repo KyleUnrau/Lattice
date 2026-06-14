@@ -1,4 +1,4 @@
-import { AccountEngine } from "./engine.js";
+import { PositionLotStore } from "./position-lot-store.js";
 import { AccountFolder } from "./folder.js";
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import type { Orientation } from "../ledger.js";
@@ -11,15 +11,15 @@ import type { AccountSummary } from "./summary.js";
 
 
 /**
- * Manages per-position {@link AccountEngine}s containing UTXO and UTXI lots. Implements
- * the double-sided ledger entry point: `generateInputs` pulls value out (spending/disposal)
- * by consuming existing UTXO lots; `generateOutputs` pushes value in (receipt/income) by
- * settling existing UTXI obligations. Both methods use the account's configured
+ * Manages per-position {@link PositionLotStore}s containing UTXO and UTXI lots. Implements
+ * the double-sided ledger entry point: `generateInputs` consumes existing UTXO lots to
+ * produce transaction inputs; `generateOutputs` produces transaction outputs (new lots),
+ * settling existing UTXI obligations first. Both methods use the account's configured
  * {@link DisposalMethod}s for lot selection.
  */
 
 export class Account implements AccountNode {
-    public readonly engines: Map<Position, AccountEngine> = new Map();
+    public readonly lotStores: Map<Position, PositionLotStore> = new Map();
 
     constructor(
         public name: string,
@@ -29,53 +29,53 @@ export class Account implements AccountNode {
         public readonly utxiDisposalMethod: DisposalMethod<UTXI>
     ) { }
 
-    public getRootOrientation(): Orientation {
+    public getEffectiveOrientation(): Orientation {
         if (this.parent === null) return this.localOrientation;
-        return this.parent.getRootOrientation() * this.localOrientation;
+        return this.parent.getEffectiveOrientation() * this.localOrientation;
     }
 
-    public getRootRawBalance(position: Position, transactions: Transaction[]): bigint {
-        if (!this.engines.has(position)) return 0n;
-        return this.getEngine(position).getRootBalance(transactions);
+    public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
+        if (!this.lotStores.has(position)) return 0n;
+        return this.getLotStore(position).getSignedBalanceScaled(transactions);
     }
 
-    public getRootRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
-        for (const [position] of this.engines) result.set(position, this.getRootRawBalance(position, transactions));
+        for (const [position] of this.lotStores) result.set(position, this.getSignedBalanceScaled(position, transactions));
         return result;
     }
 
-    public getRawBalance(position: Position, transactions: Transaction[]): bigint {
-        return BigInt(this.getRootOrientation()) * this.getRootRawBalance(position, transactions);
+    public getBalanceRaw(position: Position, transactions: Transaction[]): bigint {
+        return BigInt(this.getEffectiveOrientation()) * this.getSignedBalanceScaled(position, transactions);
     }
 
-    public getRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getBalancesRaw(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
-        for (const [position] of this.engines) result.set(position, this.getRawBalance(position, transactions));
+        for (const [position] of this.lotStores) result.set(position, this.getBalanceRaw(position, transactions));
         return result;
     }
 
     public getBalance(position: Position, transactions: Transaction[]): number {
-        return unscale(this.getRawBalance(position, transactions), position);
+        return unscale(this.getBalanceRaw(position, transactions), position);
     }
 
     public getBalances(transactions: Transaction[]): Map<Position, number> {
         const result = new Map<Position, number>();
-        for (const [pos] of this.engines) result.set(pos, this.getBalance(pos, transactions));
+        for (const [pos] of this.lotStores) result.set(pos, this.getBalance(pos, transactions));
         return result;
     }
 
-    public getEngine(position: Position): AccountEngine {
-        if (!this.engines.has(position)) this.engines.set(position, new AccountEngine(position, this.utxoDisposalMethod, this.utxiDisposalMethod));
-        return this.engines.get(position)!;
+    public getLotStore(position: Position): PositionLotStore {
+        if (!this.lotStores.has(position)) this.lotStores.set(position, new PositionLotStore(position, this.utxoDisposalMethod, this.utxiDisposalMethod));
+        return this.lotStores.get(position)!;
     }
 
     public generateInputs(position: Position, value: number, transactions: Transaction[]): Input[] {
-        return this.getEngine(position).generateInputs(value, transactions);
+        return this.getLotStore(position).generateInputs(value, transactions);
     }
 
     public generateOutputs(position: Position, value: number, transactions: Transaction[]): Output[] {
-        return this.getEngine(position).generateOutputs(value, transactions);
+        return this.getLotStore(position).generateOutputs(value, transactions);
     }
 
     public summarize(position: Position, transactions: Transaction[]): AccountSummary {

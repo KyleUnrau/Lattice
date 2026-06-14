@@ -86,12 +86,12 @@ export class ExchangeResolution {
     // cost basis at the actual market rate, carrying the consumed value's provenance onward.
     // Tagging with `exchangeAccount` scopes this exchange to that account's open-position view.
     // `exchangeAccount` is always supplied by callers (required in the constructor); when the
-    // exchange fully closes a loop and newExchangeToQuantity is zero, it is simply not used.
+    // exchange fully closes a loop and forwardExchangeToQuantity is zero, it is simply not used.
     private forwardExchange(resolution: RecaptureResolution, sourcePosition: Position, targetPosition: Position, exchangeAccount: ExchangePositionsAccount): Exchange | null {
-        if (resolution.newExchangeToQuantity <= 0n) return null;
+        if (resolution.forwardExchangeToQuantity <= 0n) return null;
         return new Exchange(
-            { quantity: resolution.newExchangeToQuantity, position: sourcePosition },
-            { quantity: resolution.newExchangeFromQuantity, position: targetPosition },
+            { quantity: resolution.forwardExchangeToQuantity, position: sourcePosition },
+            { quantity: resolution.forwardExchangeFromQuantity, position: targetPosition },
             exchangeAccount
         );
     }
@@ -146,7 +146,7 @@ export class ExchangeResolution {
     /** Outputs for the consuming/surface transaction: surface-position recapture settlements, the forward from-side, and closed residual legs. */
     public getFromOutputs(): Output[] {
         return [
-            ...this.recaptures.filter(r => r.from.source.position === this.surfacePosition).map(r => r.from),
+            ...this.recaptures.filter(r => r.settlement.source.position === this.surfacePosition).map(r => r.settlement),
             ...(this.exchange ? [this.exchange.from] : []),
             ...this.residualCloseOutputs,
         ];
@@ -155,7 +155,7 @@ export class ExchangeResolution {
     /** Inputs for the receiving/target transaction: target-position recapture reclaims, forward to-side, gain residual, and settled-residual mints. */
     public getToInputs(): Input[] {
         return [
-            ...this.recaptures.filter(r => r.to.source.position === this.targetPosition).map(r => r.to),
+            ...this.recaptures.filter(r => r.reclaim.source.position === this.targetPosition).map(r => r.reclaim),
             ...(this.exchange ? [this.exchange.to] : []),
             ...this.residuals.filter((r): r is ResidualUTXI => r instanceof ResidualUTXI),
             ...this.residualMintInputs,

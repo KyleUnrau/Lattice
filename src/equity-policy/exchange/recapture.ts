@@ -8,7 +8,7 @@ import { collectOriginLeaves, unwind } from "../book-value/lineage.js";
 import { executeRecaptures, summarizeConsumption } from "../recaptures.js";
 
 // Internal intermediate shape — not part of the public API.
-type RecaptureComputation = {
+type RecaptureResolution = {
     /** One recapture per distinct exchange on the recovered loop path(s); may span positions. */
     recaptures: ExchangeRecapture[];
     /** Recovered basis in `targetPosition` (the loop principal). */
@@ -18,9 +18,9 @@ type RecaptureComputation = {
     /** Gain (>0) or loss (<0) residual in `targetPosition`; balances the target transaction. */
     residualQuantity: bigint;
     /** Forward-exchange surface-side quantity (origin/forward portion with no loop). */
-    newExchangeToQuantity: bigint;
+    forwardExchangeToQuantity: bigint;
     /** Forward-exchange target-side quantity at the actual proceeds rate. */
-    newExchangeFromQuantity: bigint;
+    forwardExchangeFromQuantity: bigint;
     /**
      * The origin-position composition of `residualQuantity`, derived from the recovered loop
      * principal's deep lineage and scaled by the residual's share. Carried onto the residual lot
@@ -60,7 +60,7 @@ export function computeRecaptureResolution(
     totalActualReceived: number,
     engine: BookValueEngine,
     transactions: Transaction[]
-): RecaptureComputation {
+): RecaptureResolution {
     const { surfacePosition, totalConsumed } = summarizeConsumption(inputs);
     if (surfacePosition === undefined) throw new Error("computeRecaptureResolution requires at least one consumed input");
 
@@ -75,8 +75,8 @@ export function computeRecaptureResolution(
     let totalCostBasis = 0n;
     let surfaceSettled = 0n;
     for (const recapture of recaptures) {
-        if (recapture.to.source.position === targetPosition) totalCostBasis += recapture.to.quantity;
-        if (recapture.from.source.position === surfacePosition) surfaceSettled += recapture.from.quantity;
+        if (recapture.reclaim.source.position === targetPosition) totalCostBasis += recapture.reclaim.quantity;
+        if (recapture.settlement.source.position === surfacePosition) surfaceSettled += recapture.settlement.quantity;
     }
 
     const scaledProceeds = scale(totalActualReceived, targetPosition);
@@ -88,14 +88,14 @@ export function computeRecaptureResolution(
 
     // The forward portion is whatever surface value neither looped nor came from a residual.
     // Deriving it from the actually-settled surface amount keeps the consuming transaction exact.
-    const newExchangeToQuantity = totalConsumed - surfaceSettled - residualDerivedTotal;
-    const newExchangeFromQuantity = newExchangeToQuantity > 0n && totalConsumed > 0n
-        ? scaledProceeds * newExchangeToQuantity / totalConsumed
+    const forwardExchangeToQuantity = totalConsumed - surfaceSettled - residualDerivedTotal;
+    const forwardExchangeFromQuantity = forwardExchangeToQuantity > 0n && totalConsumed > 0n
+        ? scaledProceeds * forwardExchangeToQuantity / totalConsumed
         : 0n;
 
     // Gain (>0) / loss (<0) on the recovered loop: proceeds minus everything else accounted for.
     // Absorbing the rounding remainder here keeps the target transaction balanced exactly.
-    const residualQuantity = scaledProceeds - totalCostBasis - newExchangeFromQuantity - residualDerivedProceeds;
+    const residualQuantity = scaledProceeds - totalCostBasis - forwardExchangeFromQuantity - residualDerivedProceeds;
 
     // Deep origin composition of the loop principal, scaled by the residual's share — the
     // deferred equity the residual carries until it later settles into its origin.
@@ -103,8 +103,8 @@ export function computeRecaptureResolution(
     if (residualQuantity !== 0n && totalCostBasis > 0n) {
         const principalOrigin = new Map<Position, bigint>();
         for (const recapture of recaptures) {
-            if (recapture.to.source.position !== targetPosition || recapture.to.quantity <= 0n) continue;
-            for (const [position, quantity] of collectOriginLeaves(engine.compute([recapture.to])))
+            if (recapture.reclaim.source.position !== targetPosition || recapture.reclaim.quantity <= 0n) continue;
+            for (const [position, quantity] of collectOriginLeaves(engine.compute([recapture.reclaim])))
                 principalOrigin.set(position, (principalOrigin.get(position) ?? 0n) + quantity);
         }
         const magnitude = residualQuantity < 0n ? -residualQuantity : residualQuantity;
@@ -117,8 +117,8 @@ export function computeRecaptureResolution(
         totalCostBasis,
         surfacePosition,
         residualQuantity,
-        newExchangeToQuantity,
-        newExchangeFromQuantity,
+        forwardExchangeToQuantity,
+        forwardExchangeFromQuantity,
         residualOriginBasis,
         residualNodes,
         residualDerivedProceeds,

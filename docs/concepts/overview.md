@@ -36,7 +36,7 @@ These questions are difficult when cost basis is stored as annotations on record
 
 **Conservation is enforced structurally.** `Transaction` construction throws if `sum(inputs) ≠ sum(outputs)`. Imbalance cannot exist at rest.
 
-**Orientation replaces debit/credit.** The account tree propagates a multiplicative orientation (`+1` or `−1`) from root to leaf. The signed balance of any account is `rawBalance × rootOrientation`. There are no hardcoded debit/credit labels.
+**Orientation replaces debit/credit.** The account tree propagates a multiplicative orientation (`+1` or `−1`) from root to leaf. The oriented (displayed) balance of any account is `signedBalance × effectiveOrientation`. There are no hardcoded debit/credit labels.
 
 **Kernel enforces structure; policy enforces meaning.** The ledger kernel holds structural invariants. The equity-policy layer (swap, expense, recapture) holds business logic. Neither layer reaches into the other's domain.
 

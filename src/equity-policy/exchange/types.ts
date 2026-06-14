@@ -23,9 +23,9 @@ export function lossAccountOf(target: ResidualTarget): ResidualAccount {
 /** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
 export interface ExchangeRecapture {
     /** {@link UTXIConsumption} settling the to-side of the original exchange. Goes in a transaction's outputs. */
-    from: UTXIConsumption;
+    settlement: UTXIConsumption;
     /** {@link UTXOConsumption} reclaiming the from-side of the original exchange. Goes in a transaction's inputs. */
-    to: UTXOConsumption;
+    reclaim: UTXOConsumption;
 }
 
 /** A single-position settlement transaction emitted as part of a multi-hop unwind. */

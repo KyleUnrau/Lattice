@@ -19,13 +19,13 @@ function originOf(f: Fixture, lot: UTXO): Map<Position, bigint> {
 }
 
 /** All UTXO lots an account currently holds in a position (committed or not), in creation order. */
-function lotsOf(_f: Fixture, account: { getEngine(p: Position): { utxos: UTXO[] } }, position: Position): UTXO[] {
-    return account.getEngine(position).utxos;
+function lotsOf(_f: Fixture, account: { getLotStore(p: Position): { utxos: UTXO[] } }, position: Position): UTXO[] {
+    return account.getLotStore(position).utxos;
 }
 
 /** The open-position balance an exchange account reports for a position. */
-function open(f: Fixture, account: { getRootRawBalance(p: Position, t: any): bigint }, position: Position): bigint {
-    return account.getRootRawBalance(position, f.ledger.transactions);
+function open(f: Fixture, account: { getSignedBalanceScaled(p: Position, t: any): bigint }, position: Position): bigint {
+    return account.getSignedBalanceScaled(position, f.ledger.transactions);
 }
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ test("INV1: a forward exchange attributes basis only to the exchanged portion, n
     // Cash holds 600 CAD leftover + 500 CAD fresh + 300 USD; nothing realized yet.
     assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 1100);
     assert.equal(f.cash.getBalance(f.usd, f.ledger.transactions), 300);
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), 0n);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n);
 });
 
 // ---------------------------------------------------------------------------
@@ -81,8 +81,8 @@ test("INV2: closing a CAD→USD→Oranges→CAD loop recaptures both prior edges
     assert.equal(closing.resolution.recaptures.length, 2, "both CAD→USD and USD→Oranges recaptured");
 
     // The recaptures reclaim the from-sides (CAD, USD) and settle the to-sides (USD, Oranges).
-    const reclaimed = closing.resolution.recaptures.map(r => r.to.source.position).sort((a, b) => a.name.localeCompare(b.name));
-    const settled = closing.resolution.recaptures.map(r => r.from.source.position).sort((a, b) => a.name.localeCompare(b.name));
+    const reclaimed = closing.resolution.recaptures.map(r => r.reclaim.source.position).sort((a, b) => a.name.localeCompare(b.name));
+    const settled = closing.resolution.recaptures.map(r => r.settlement.source.position).sort((a, b) => a.name.localeCompare(b.name));
     assert.deepEqual(reclaimed, [f.cad, f.usd], "recaptures reclaim CAD and USD from-sides");
     assert.deepEqual(settled, [f.oranges, f.usd], "recaptures settle Oranges and USD to-sides");
 
@@ -101,7 +101,7 @@ test("INV2: closing a CAD→USD→Oranges→CAD loop recaptures both prior edges
     }
 
     // 100 CAD gain recognized (proceeds 600 vs 500 basis).
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), -10000n);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -10000n);
 });
 
 // ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ test("INV3: a recovered-loop residual gain inherits proportional BTC origin basi
     assert.equal(residual.originBasis.has(f.cad), false, "gain is NOT attributed to origin CAD");
 
     // 50 CAD gain recognized in equity; inner loop settled; outer BTC leg remains open (unrealized).
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), -5000n);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n);
     assert.equal(open(f, f.cadToUsd, f.cad), 0n);
     assert.equal(open(f, f.cadToUsd, f.usd), 0n);
     assert.equal(open(f, f.usdToCad, f.cad), 0n);
@@ -162,7 +162,7 @@ test("INV4: a recovered-loop residual loss is symmetrical and preserves BTC orig
     assert.equal(residual.originBasis.get(f.btc), 50000n, "loss inherits 0.0005 BTC origin basis");
 
     // 50 CAD loss recognized (capital-loss account carries the residual lot); loop accounts settled.
-    assert.equal(f.capitalLosses.getRootRawBalance(f.cad, f.ledger.transactions), 5000n);
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.cad, f.ledger.transactions), 5000n);
     assert.equal(open(f, f.cadToUsd, f.cad), 0n);
     assert.equal(open(f, f.cadToUsd, f.usd), 0n);
     assert.equal(open(f, f.usdToCad, f.cad), 0n);
@@ -202,8 +202,8 @@ test("INV5: residual-derived CAD settles back against its inherited BTC basis in
     // The deferred 50 CAD gain is re-recognized in the origin asset: the CAD gain leg is reversed
     // (back to 0) and the gain surfaces as 0.0005 BTC — matching the inherited basis at the unchanged
     // rate, so the round trip nets out economically.
-    assert.equal(f.capitalGains.getRootRawBalance(f.cad, f.ledger.transactions), 0n, "provisional CAD gain reversed");
-    assert.equal(f.capitalGains.getRootRawBalance(f.btc, f.ledger.transactions), -50000n, "gain realized as 0.0005 BTC");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "provisional CAD gain reversed");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.btc, f.ledger.transactions), -50000n, "gain realized as 0.0005 BTC");
 
     // Economic truth: 0.01 BTC round-tripped to 0.0105 BTC; wallet = 0.01 untouched + 0.0105 = 0.0205.
     assert.equal(f.wallet.getBalance(f.btc, f.ledger.transactions), 0.0205);

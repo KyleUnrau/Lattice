@@ -6,8 +6,8 @@
 
 ```ts
 const netAssets = new AccountFolder("Net Assets", Orientation.Positive);
-const netWorth  = new AccountFolder("Net Worth",  Orientation.Negative);
-const ledger    = new Ledger(netAssets, netWorth);
+const equity    = new AccountFolder("Net Worth",  Orientation.Negative);
+const ledger    = new Ledger(netAssets, equity);
 
 const assets        = netAssets.addFolder("Assets",         Orientation.Positive);
 const currentAssets = assets.addFolder("Current Assets",    Orientation.Positive);
@@ -17,15 +17,15 @@ const currentAssets = assets.addFolder("Current Assets",    Orientation.Positive
 
 ## Account
 
-`Account` is a leaf node. It holds per-position `AccountEngine`s and is the only type that generates transaction inputs and outputs.
+`Account` is a leaf node. It holds per-position `PositionLotStore`s and is the only type that generates transaction inputs and outputs.
 
 ```ts
 const cash = currentAssets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 ```
 
-**`generateInputs(position, quantity, transactions)`** — pulls value out of the account. Consumes existing `UTXO` lots using the configured disposal method. If more is requested than available, creates a fresh `UTXI` for the shortfall.
+**`generateInputs(position, quantity, transactions)`** — produces transaction *inputs* that pull value out of the account. Consumes existing `UTXO` lots using the configured disposal method. If more is requested than available, creates a fresh `UTXI` for the shortfall.
 
-**`generateOutputs(position, quantity, transactions)`** — delivers value into the account. Settles existing `UTXI` obligations. Creates a fresh `UTXO` for any surplus.
+**`generateOutputs(position, quantity, transactions)`** — produces transaction *outputs* that deliver value into the account. Settles existing `UTXI` obligations. Creates a fresh `UTXO` for any surplus.
 
 The `transactions` parameter is required because lot availability is computed dynamically by scanning history — there is no cached balance state.
 
@@ -37,25 +37,25 @@ The `transactions` parameter is required because lot availability is computed dy
 enum Orientation { Positive = 1, Negative = -1 }
 ```
 
-Each node in the account tree has a `localOrientation`. The `rootOrientation` of a node is the product of all its ancestors' orientations, including its own.
+Each node in the account tree has a `localOrientation`. The `effectiveOrientation` of a node is the product of all its ancestors' orientations, including its own.
 
 ```
-netAssets (+1) → assets (+1) → currentAssets (+1) → cash (+1)  → rootOrientation = +1
-netWorth  (-1) → openingBalance (+1)                            → rootOrientation = -1
-netWorth  (-1) → netIncome (+1) → capitalGains (+1)             → rootOrientation = -1
+netAssets (+1) → assets (+1) → currentAssets (+1) → cash (+1)  → effectiveOrientation = +1
+equity    (-1) → openingBalance (+1)                          → effectiveOrientation = -1
+equity    (-1) → netIncome (+1) → capitalGains (+1)           → effectiveOrientation = -1
 ```
 
-The `rawBalance` of an account is `UTXO availability − UTXI availability` — always computed the same way regardless of account type.
+The **canonical** balance of an account (`getSignedBalanceScaled`) is `UTXO availability − UTXI availability` — always computed the same way regardless of account type, in the ledger-wide sign convention that makes the zero-sum invariant hold.
 
-The `balance` displayed on a financial statement is `rawBalance × rootOrientation`. This single rule replaces all hardcoded debit/credit semantics.
+The **oriented** balance displayed on a financial statement (`getBalanceRaw`, or `getBalance` for the human-scaled number) is `signedBalance × effectiveOrientation`. This single rule replaces all hardcoded debit/credit semantics.
 
 ---
 
-## AccountEngine
+## PositionLotStore
 
-Each `Account` maintains a per-position `AccountEngine` created on demand when a new position is first touched. The engine holds the raw `UTXO[]` and `UTXI[]` lists and implements the generation logic using the account's configured disposal methods.
+Each `Account` maintains a per-position `PositionLotStore` created on demand when a new position is first touched. The store holds the raw `UTXO[]` and `UTXI[]` lists and implements the input/output generation logic using the account's configured disposal methods.
 
-`AccountEngine` is an internal detail — callers interact with `Account.generateInputs()` and `Account.generateOutputs()`.
+`PositionLotStore` is an internal detail — callers interact with `Account.generateInputs()` and `Account.generateOutputs()`.
 
 ---
 
@@ -112,15 +112,15 @@ Adding this account to the equity tree ensures `ledger.verify()` passes even wit
 **Universal mode** (default) — one account covering all exchanges with no explicit scoping assignment:
 
 ```ts
-const exchangePositions = netWorth.addExchangeAccount("Net Transfers In (Out)", Orientation.Positive);
+const exchangePositions = equity.addExchangeAccount("Net Transfers In (Out)", Orientation.Positive);
 // All swaps/ExchangeResolutions that don't pass exchangeAccount appear here
 ```
 
 **Scoped mode** — multiple accounts, each tracking a specific exchange direction by passing the account to `swap()` or `ExchangeResolution`. Each forward exchange is tagged to exactly one account; exchanges tagged to a different account are excluded.
 
 ```ts
-const cadToUsdPositions    = netWorth.addExchangeAccount("Transfers CAD→USD",    Orientation.Positive);
-const usdToOrangesPositions = netWorth.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
+const cadToUsdPositions    = equity.addExchangeAccount("Transfers CAD→USD",    Orientation.Positive);
+const usdToOrangesPositions = equity.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
 
 swap({ ..., exchangeAccount: cadToUsdPositions });    // phase 1 exchange tagged here
 swap({ ..., exchangeAccount: usdToOrangesPositions }); // phase 2 exchange tagged here
@@ -132,7 +132,7 @@ When using scoped accounts, every forward exchange should be explicitly tagged t
 
 ## Ledger Verification
 
-`ledger.verify()` checks that for every position, the sum of all root balances across `netAssets` and `netWorth` equals zero (exactly, in `bigint`). Open exchange positions are handled automatically because `ExchangePositionsAccount` is part of the equity tree — no special adjustment is needed.
+`ledger.verify()` checks that for every position, the sum of all canonical balances across `netAssets` and `equity` equals zero (exactly, in `bigint`). Open exchange positions are handled automatically because `ExchangePositionsAccount` is part of the equity tree — no special adjustment is needed.
 
 ---
 

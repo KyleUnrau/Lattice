@@ -11,8 +11,8 @@ import type { AccountFolder } from "./folder.js";
 /**
  * Base class for read-only accounts whose balance is derived by scanning the transaction
  * history rather than being tracked via explicit lot entries. Subclasses implement
- * `getRootRawBalance` and `getRootRawBalances`; the common orientation and display logic
- * lives here. No `generateInputs` or `generateOutputs` — these accounts cannot be used
+ * `getSignedBalanceScaled` and `getSignedBalancesScaled`; the common orientation and display
+ * logic lives here. No `generateInputs` or `generateOutputs` — these accounts cannot be used
  * as sources or destinations in transaction construction.
  */
 export abstract class ComputedAccount implements AccountNode {
@@ -23,32 +23,32 @@ export abstract class ComputedAccount implements AccountNode {
         public localOrientation: Orientation
     ) {}
 
-    public getRootOrientation(): Orientation {
+    public getEffectiveOrientation(): Orientation {
         if (this.parent === null) return this.localOrientation;
-        return this.parent.getRootOrientation() * this.localOrientation;
+        return this.parent.getEffectiveOrientation() * this.localOrientation;
     }
 
-    public abstract getRootRawBalance(position: Position, transactions: Transaction[]): bigint;
-    public abstract getRootRawBalances(transactions: Transaction[]): Map<Position, bigint>;
+    public abstract getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint;
+    public abstract getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint>;
 
-    public getRawBalance(position: Position, transactions: Transaction[]): bigint {
-        return BigInt(this.getRootOrientation()) * this.getRootRawBalance(position, transactions);
+    public getBalanceRaw(position: Position, transactions: Transaction[]): bigint {
+        return BigInt(this.getEffectiveOrientation()) * this.getSignedBalanceScaled(position, transactions);
     }
 
-    public getRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getBalancesRaw(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
-        for (const [position, rootBal] of this.getRootRawBalances(transactions))
-            result.set(position, BigInt(this.getRootOrientation()) * rootBal);
+        for (const [position, signed] of this.getSignedBalancesScaled(transactions))
+            result.set(position, BigInt(this.getEffectiveOrientation()) * signed);
         return result;
     }
 
     public getBalance(position: Position, transactions: Transaction[]): number {
-        return unscale(this.getRawBalance(position, transactions), position);
+        return unscale(this.getBalanceRaw(position, transactions), position);
     }
 
     public getBalances(transactions: Transaction[]): Map<Position, number> {
         const result = new Map<Position, number>();
-        for (const [pos, raw] of this.getRawBalances(transactions)) result.set(pos, unscale(raw, pos));
+        for (const [pos, raw] of this.getBalancesRaw(transactions)) result.set(pos, unscale(raw, pos));
         return result;
     }
 
@@ -63,11 +63,11 @@ export abstract class ComputedAccount implements AccountNode {
  * remaining availability. Matched exchange pairs at the same locked rate cancel to zero, so
  * only truly unresolved positions carry a balance.
  *
- * Adding this as a child of the equity folder ensures `equity.getRootRawBalances()` includes
+ * Adding this as a child of the equity folder ensures `equity.getSignedBalancesScaled()` includes
  * open positions automatically — no adjustment is needed inside `ledger.verify()`.
  */
 export class ExchangePositionsAccount extends ComputedAccount implements ExchangeAccountMarker {
-    public getRootRawBalance(position: Position, transactions: Transaction[]): bigint {
+    public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         let balance = 0n;
         for (const tx of transactions) {
             for (const output of tx.outputs)
@@ -82,7 +82,7 @@ export class ExchangePositionsAccount extends ComputedAccount implements Exchang
         return balance;
     }
 
-    public getRootRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const positions = new Set<Position>();
         for (const tx of transactions) {
             for (const output of tx.outputs)
@@ -94,7 +94,7 @@ export class ExchangePositionsAccount extends ComputedAccount implements Exchang
         }
         const result = new Map<Position, bigint>();
         for (const position of positions) {
-            const balance = this.getRootRawBalance(position, transactions);
+            const balance = this.getSignedBalanceScaled(position, transactions);
             if (balance !== 0n) result.set(position, balance);
         }
         return result;
@@ -143,7 +143,7 @@ export class ResidualAccount extends ComputedAccount {
         return utxo;
     }
 
-    public getRootRawBalance(position: Position, transactions: Transaction[]): bigint {
+    public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         let balance = 0n;
         for (const utxi of this.utxis)
             if (utxi.position === position && utxi.isCommitted(transactions)) balance -= utxi.calculateAvailable(transactions);
@@ -152,14 +152,14 @@ export class ResidualAccount extends ComputedAccount {
         return balance;
     }
 
-    public getRootRawBalances(transactions: Transaction[]): Map<Position, bigint> {
+    public getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const positions = new Set<Position>([
             ...this.utxis.map(t => t.position),
             ...this.utxos.map(t => t.position),
         ]);
         const result = new Map<Position, bigint>();
         for (const position of positions) {
-            const balance = this.getRootRawBalance(position, transactions);
+            const balance = this.getSignedBalanceScaled(position, transactions);
             if (balance !== 0n) result.set(position, balance);
         }
         return result;

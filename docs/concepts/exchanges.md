@@ -47,8 +47,8 @@ When value later moves back toward the origin position (or out of the system ent
 
 ```ts
 const recapture = ex.recapture(toSideQuantity, transactions);
-// recapture.from  UTXIConsumption — settles part of ex.to;   goes in outputs
-// recapture.to    UTXOConsumption — reclaims part of ex.from; goes in inputs
+// recapture.settlement  UTXIConsumption — settles part of ex.to;   goes in outputs
+// recapture.reclaim     UTXOConsumption — reclaims part of ex.from; goes in inputs
 ```
 
 Recapture is the mechanism through which:
@@ -81,9 +81,9 @@ The exchange system is deliberately split into three layers, from lowest to high
 |---|---|---|---|
 | **Exchange primitives** | `Exchange`, `ExchangedUTXO/UTXI`, `ResidualUTXO/UTXI`, `Exchange.recapture` — the kernel-level locked-rate links and their consumption. | `ledger-kernel/transactions/cross-position.ts` | No — they are lines you place into transactions. |
 | **Exchange resolution** | `ExchangeResolution` (built on `computeRecaptureResolution` / `unwind`). Given **only the exchanged portion** of consumed value plus the proceeds, it computes every line — recaptures, the forward exchange, gain/loss residuals, residual-node settlements — and hands them back as arrays. | `equity-policy/exchange/resolution.ts` | No — **you** assemble the transactions. |
-| **`swap()`** | The convenience helper for the clean, full-quantity, two-account case. Draws the source inputs, resolves, and commits the consuming → hops → receiving chain. | `equity-policy/exchange/swap.ts` | Yes — it owns the whole transaction on each side. |
+| **`swap()`** | The convenience helper for the clean, full-quantity case. The caller draws `fromInputs` and stages `toOutputs`; `swap` resolves the exchange and builds the downstream transactions, returning `{ fromOutputs, to, intermediates }`. Commit them in order: consuming → hops → receiving. | `equity-policy/exchange/swap.ts` | No — builds `to` and hop transactions but does not commit them; the caller commits all three. |
 
-`swap()` is the right tool when the entire source draw is exchanged into the entire proceeds and nothing else shares those transactions. The moment that stops being true — a partial exchange, or an event that also has a fee/deposit/withdrawal — reach for `ExchangeResolution` directly.
+`swap()` is the right tool when the entire source draw is exchanged into the entire proceeds and nothing else shares those transactions. The moment that stops being true — a partial exchange, or an event that also has a fee/deposit/withdrawal — reach for `ExchangeResolution` directly and assemble the transactions yourself.
 
 ---
 
@@ -132,16 +132,22 @@ The `ExchangePositionsAccount` computed equity account scans every `ExchangedUTX
 
 ## The High-Level API
 
-For the clean, full-quantity, two-account case you don't construct exchanges directly — the `swap()` function handles the full cycle (for partial or mixed events, drop down to `ExchangeResolution` as shown above):
+For the clean, full-quantity case you don't construct exchanges directly — `swap()` handles the full cycle (for partial or mixed events, drop down to `ExchangeResolution` as shown above):
 
 ```ts
-swap({
-    source: cadAccount, from: cad, quantity: 500,
-    destination: usdAccount, to: usd, proceeds: 375,
-    engine, ledger,
-    residualAccount: capitalGains,   // where to recognize gains/losses
-    exchangeAccount: cadToUsdPositions  // optional: scope this exchange to a specific account
+const fromInputs = cadAccount.generateInputs(cad, 500, ledger.transactions);
+const toOutputs = usdAccount.generateOutputs(usd, 375, ledger.transactions);
+
+const result = swap({
+    fromInputs, toOutputs, engine,
+    transactions: ledger.transactions,
+    residualAccount: capitalGains,       // where to recognize gains/losses
+    exchangeAccount: cadToUsdPositions   // required; carries zero when no forward leg opens
 });
+
+// Commit in dependency order: consuming → intermediate hops → receiving
+ledger.newTransaction(fromInputs, result.fromOutputs);
+ledger.addTransaction(...result.intermediates, result.to);
 ```
 
 `swap()` internally calls `ExchangeResolution`, which:
@@ -149,7 +155,7 @@ swap({
 2. Identifies which prior exchanges loop back to `usd` and recaptures them
 3. Opens a forward exchange for any portion without prior loop lineage (scoped to the required `exchangeAccount`)
 4. Recognizes any gain/loss as a residual — gains go to the gain account, losses to the loss account (see `ResidualTarget` in [Account System](../architecture/accounts.md))
-5. Commits all transactions (consuming, intermediate hops, receiving) to the ledger
+5. Returns the resolved lines; `swap()` builds the `to` and hop `Transaction` objects and returns `{ resolution, fromOutputs, to, intermediates }` for the caller to commit
 
 **`residualAccount`** accepts either a single `ResidualAccount` (gains and losses share it) or `{ gain: ResidualAccount, loss: ResidualAccount }` to route them to separate accounts.
 

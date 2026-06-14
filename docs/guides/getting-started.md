@@ -28,17 +28,17 @@ All of the following are available without any prefix:
 
 **Positions:** `cad`, `usd`, `oranges`
 
-**Accounts:** `cash`, `inventory`, `wallet`, `openingBalance`, `exchangeExpense`, `capitalGains`
+**Accounts:** `cash`, `inventory`, `wallet`, `openingBalance`, `exchangeExpense`, `capitalGains`, `capitalLosses`
 
-**Exchange position accounts:** `cadToUsdPositions`, `usdToOrangesPositions`
+**Exchange position accounts:** `cadToUsdPositions`, `usdToOrangesPositions`, `orangesToCadPositions`
 
-**Account folders:** `netAssets`, `netWorth`, `assets`, `currentAssets`, `netIncome`, `expenses`
+**Account folders:** `netAssets`, `equity`, `assets`, `currentAssets`, `netIncome`, `expenses`
 
 **Infrastructure:** `ledger`, `engine`
 
 **Phase functions:** `phase0()`, `phase1()`, `phase2()`, `phase3()`
 
-**Equity-policy functions:** `swap`, `expense`, `ExchangeResolution`
+**Equity-policy functions:** `swap`, `expense`, `ExchangeResolution`, `computeRecaptureResolution`, `unwind`
 
 **Residual routing helpers:** `gainAccountOf`, `lossAccountOf`
 
@@ -60,14 +60,17 @@ All of the following are available without any prefix:
 > cash.getBalances(ledger.transactions)
 // Shows cash account balances per position
 
-> capitalGains.getRootRawBalance(cad, ledger.transactions)
-// -10000n  (100.00 CAD gain; negative root balance because rootOrientation = -1)
+// Gains land in capitalGains (ResidualUTXI → negative canonical); losses in capitalLosses (ResidualUTXO → positive canonical)
+> capitalGains.getSignedBalanceScaled(cad, ledger.transactions)
+// -10000n  (100.00 CAD gain as ResidualUTXI; signed = UTXO − UTXI, so UTXI gives negative canonical)
+> capitalGains.getBalance(cad, ledger.transactions)
+// 100  (oriented = effectiveOrientation(-1) × signed(-10000n) → positive)
 
-> cadToUsdPositions.getRootRawBalances(ledger.transactions)
+> cadToUsdPositions.getSignedBalancesScaled(ledger.transactions)
 // After phase1 (before phase3): Map { cad => 50000n, usd => -37500n }
 // After phase3: empty Map (exchange settled)
 
-> usdToOrangesPositions.getRootRawBalances(ledger.transactions)
+> usdToOrangesPositions.getSignedBalancesScaled(ledger.transactions)
 // After phase2 (before phase3): Map { usd => 37500n, oranges => -1500n }
 // After phase3: empty Map (exchange settled)
 ```
