@@ -1,5 +1,8 @@
 import { BookValueEngine } from "./equity-policy/book-value/engine.js";
+import { ExchangeResolution, ExchangeTransactions } from "./equity-policy/exchange.js";
+import { ExpenseResolution, type ExpenseTransactions } from "./equity-policy/expense.js";
 import type { Account } from "./ledger-kernel/accounts/account.js";
+import type { ExchangeAccount, ResidualAccount } from "./ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
@@ -23,10 +26,12 @@ export interface LedgerView {
 export namespace ScenarioExpensesCase1 {
     interface Positions {
         cad: Position;
+        usd: Position;
     }
 
     export const positions: Positions = {
-        cad: { name: "Canadian Dollars", decimals: 2 }
+        cad: { name: "Canadian Dollars", decimals: 2 },
+        usd: { name: "United States Dollars", decimals: 2 }
     }
 
     interface Accounts {
@@ -37,6 +42,8 @@ export namespace ScenarioExpensesCase1 {
         cash: Account;
 
         openingBalance: Account;
+        capitalGainsOrLosses: ResidualAccount;
+        netTransfers: ExchangeAccount;
 
         netIncome: AccountFolder;
         expenses: AccountFolder;
@@ -51,7 +58,9 @@ export namespace ScenarioExpensesCase1 {
         const cash = assets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 
         const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-        
+        const capitalGainsOrLosses = equity.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
+        const netTransfers = equity.addExchangeAccount("Net Transfers", Orientation.Positive);
+
         const netIncome = equity.addFolder("Net Income", Orientation.Positive);
         const expenses = netIncome.addFolder("Expenses", Orientation.Negative);
         const groceryExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
@@ -60,10 +69,12 @@ export namespace ScenarioExpensesCase1 {
             netAssets,
             equity,
             assets,
-            netIncome,
-            expenses,
             cash,
             openingBalance,
+            capitalGainsOrLosses,
+            netTransfers,
+            netIncome,
+            expenses,
             groceryExpense,
         };
     }
@@ -73,19 +84,51 @@ export namespace ScenarioExpensesCase1 {
     export const ledger: Ledger = new Ledger(accounts.netAssets, accounts.equity);
     export const engine = new BookValueEngine(ledger.transactions);
 
-    function phase0(): Transaction {
-        const inputs = accounts.openingBalance.generateInputs(positions.cad, 1000, ledger.transactions);
-        const outputs = accounts.cash.generateOutputs(positions.cad, 1000, ledger.transactions);
-
-        return ledger.newTransaction(inputs, outputs);
-    }
-
     export const phases = {
-        phase0
+        phase0: (): Transaction => {
+            const inputs = accounts.openingBalance.generateInputs(positions.cad, 1000, ledger.transactions);
+            const outputs = accounts.cash.generateOutputs(positions.cad, 1000, ledger.transactions);
+
+            return ledger.newTransaction(inputs, outputs);
+        },
+        phase1: (): {
+            resolution: ExchangeResolution,
+            transactions: ExchangeTransactions
+        } => {
+            const inputs = accounts.cash.generateInputs(positions.cad, 500, ledger.transactions);
+            const outputs = accounts.cash.generateOutputs(positions.usd, 375, ledger.transactions);
+
+            const resolution = new ExchangeResolution(inputs, outputs, ledger.transactions, engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            const transactions = resolution.constructTransactions();
+
+            ledger.addTransaction(...transactions.flatten());
+            
+            return {
+                resolution,
+                transactions
+            };
+        },
+        phase2: (): {
+            resolution: ExchangeResolution,
+            transactions: ExchangeTransactions
+        } => {
+            const inputs = accounts.cash.generateInputs(positions.usd, 375, ledger.transactions);
+            const outputs = accounts.cash.generateOutputs(positions.cad, 550, ledger.transactions);
+
+            const resolution = new ExchangeResolution(inputs, outputs, ledger.transactions, engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            const transactions = resolution.constructTransactions();
+
+            ledger.addTransaction(...transactions.flatten());
+
+            return {
+                resolution,
+                transactions
+            };
+        }
     };
 
     export function buildSampleLedger(): LedgerView {
-        phase0();
+        for (const phase of Object.values(phases)) phase();
 
         return {
             ledger: ledger,

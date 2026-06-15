@@ -24,6 +24,22 @@ export type ExpenseRecapturedGroup = {
     totalQuantity: bigint;
 };
 
+export class ExpenseTransactions {
+    constructor(
+        public readonly from: Transaction,
+        public readonly intermediates: Transaction[],
+        public readonly externalExpenses: Transaction[]
+    ) {}
+
+    public flatten(): Transaction[] {
+        return [
+            this.from,
+            ...this.intermediates,
+            ...this.externalExpenses
+        ];
+    }
+}
+
 /**
  * Records an expense across the **full provenance** of the consumed inputs, *without* committing any
  * transaction — the caller owns assembly. Mirrors {@link ExchangeResolution}: pass the consumed
@@ -198,5 +214,13 @@ export class ExpenseResolution {
      */
     public constructExpenseTransactions(): Transaction[] {
         return this.expenseEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions));
+    }
+
+    public constructTransactions(additionalNodes?: {inputs: Input[]; outputs: Output[]}): ExpenseTransactions {
+        return new ExpenseTransactions(
+            this.constructFromTransaction(additionalNodes),
+            this.constructIntermediateTransactions(),
+            this.constructExpenseTransactions()
+        );
     }
 }

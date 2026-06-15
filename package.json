@@ -8,8 +8,9 @@
   "main": "dist/main.js",
   "scripts": {
     "debug": "node --inspect dist/debug.js",
-    "explore": "tsc && node dist/explorer/server.js",
-    "build": "tsc",
+    "explore": "tsc && node dist/ui/explorer/server.js",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc",
     "test": "tsc && node --test \"dist/tests/**/*.test.js\"",
     "write-git-changes": "git --no-pager diff --cached > git-changes.txt" 
   },

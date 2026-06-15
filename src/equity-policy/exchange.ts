@@ -41,6 +41,22 @@ export type ExchangeRecaptureResolution = {
     residualDerivedProceeds: bigint;
 };
 
+export class ExchangeTransactions {
+    constructor(
+        public readonly from: Transaction,
+        public readonly to: Transaction,
+        public readonly intermediates: Transaction[]
+    ) {}
+
+    public flatten(): Transaction[] {
+        return [
+            this.from,
+            this.to,
+            ...this.intermediates
+        ];
+    }
+}
+
 /**
  * The exchange-resolution layer: resolves **the portion of consumed value that is actually being
  * exchanged** into `targetPosition` and produces the kernel lines needed to record it, *without*
@@ -318,6 +334,12 @@ export class ExchangeResolution {
     public constructIntermediateTransactions(): Transaction[] {
         return this.getRecaptureHops().map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions));
     }
+
+    public constructTransactions(additionalNodes?: {inputs: Input[], outputs: Output[]}): ExchangeTransactions {
+        return new ExchangeTransactions(
+            this.constructFromTransaction(additionalNodes),
+            this.constructToTransaction(),
+            this.constructIntermediateTransactions()
+        );
+    }
 }
-
-
