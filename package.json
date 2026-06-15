@@ -7,7 +7,8 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "start": "node --inspect dist/main.js",
+    "debug": "node --inspect dist/debug.js",
+    "explore": "tsc && node dist/explorer/server.js",
     "build": "tsc",
     "test": "tsc && node --test \"dist/tests/**/*.test.js\"",
     "write-git-changes": "git --no-pager diff --cached > git-changes.txt" 

@@ -45,18 +45,18 @@ export class Account implements AccountNode {
         return result;
     }
 
-    public getBalanceRaw(position: Position, transactions: Transaction[]): bigint {
+    public getBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         return BigInt(this.getEffectiveOrientation()) * this.getSignedBalanceScaled(position, transactions);
     }
 
-    public getBalancesRaw(transactions: Transaction[]): Map<Position, bigint> {
+    public getBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
-        for (const [position] of this.lotStores) result.set(position, this.getBalanceRaw(position, transactions));
+        for (const [position] of this.lotStores) result.set(position, this.getBalanceScaled(position, transactions));
         return result;
     }
 
     public getBalance(position: Position, transactions: Transaction[]): number {
-        return unscale(this.getBalanceRaw(position, transactions), position);
+        return unscale(this.getBalanceScaled(position, transactions), position);
     }
 
     public getBalances(transactions: Transaction[]): Map<Position, number> {
@@ -70,12 +70,12 @@ export class Account implements AccountNode {
         return this.lotStores.get(position)!;
     }
 
-    public generateInputs(position: Position, value: number, transactions: Transaction[]): Input[] {
-        return this.getLotStore(position).generateInputs(value, transactions);
+    public generateInputs(position: Position, quantity: number | bigint, transactions: Transaction[]): Input[] {
+        return this.getLotStore(position).generateInputs(quantity, transactions);
     }
 
-    public generateOutputs(position: Position, value: number, transactions: Transaction[]): Output[] {
-        return this.getLotStore(position).generateOutputs(value, transactions);
+    public generateOutputs(position: Position, quantity: number | bigint, transactions: Transaction[]): Output[] {
+        return this.getLotStore(position).generateOutputs(quantity, transactions);
     }
 
     public summarize(position: Position, transactions: Transaction[]): AccountSummary {

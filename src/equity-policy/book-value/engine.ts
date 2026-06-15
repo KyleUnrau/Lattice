@@ -1,11 +1,49 @@
-import { ExchangedUTXI, ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
+import { ExchangedUTXI, ResidualUTXI, type Exchange } from "../../ledger-kernel/transactions/cross-position.js";
 import { UTXI, UTXOConsumption, type Input } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
 import type { Transaction } from "../../ledger-kernel/transactions.js";
-import type { Position } from "../../ledger-kernel/positions.js";
-import type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";
+import { assertPositionUnifiromity, type Position } from "../../ledger-kernel/positions.js";
 
-export type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.js";
+/** A node in the cost basis tree returned by {@link BookValueEngine.compute}. */
+export type BasisPath = OriginPath | ExchangePath | ResidualPath;
+
+/**
+ * Terminal node — the basis trace reached a plain {@link UTXI} with no exchange lineage.
+ * Represents an opening balance, equity injection, or other unattributed inflow.
+ */
+export interface OriginPath {
+    readonly type: "origin";
+    readonly quantity: bigint;
+    readonly position: Position;
+}
+
+/**
+ * Exchange node — the basis trace crossed an {@link ExchangedUTXI}.
+ * `quantity` is the to-side amount attributed to this node; `fromQuantity` is the
+ * equivalent from-side amount at the exchange's locked rate; `basis` recurses into
+ * the from-side's own lineage.
+ */
+export interface ExchangePath {
+    readonly type: "exchange";
+    readonly exchange: Exchange;
+    readonly quantity: bigint;
+    readonly fromQuantity: bigint;
+    readonly basis: BasisPath[];
+}
+
+/**
+ * Residual node — the basis trace crossed a {@link ResidualUTXI} (deferred residual equity).
+ * `quantity` is the surface-position amount attributed to this node; `originBasis` is the
+ * proportional origin-position composition that amount carries, and `residual` references the
+ * lot itself so a consumer can settle (partially close) it. Terminal: a residual does not recurse
+ * further — its lineage is captured by `originBasis`.
+ */
+export interface ResidualPath {
+    readonly type: "residual";
+    readonly residual: ResidualUTXI;
+    readonly quantity: bigint;
+    readonly originBasis: Map<Position, bigint>;
+}
 
 /**
  * Traverses the transaction graph to compute the cost basis of a given output quantity
@@ -14,7 +52,7 @@ export type { BasisPath, ExchangePath, OriginPath, ResidualPath } from "./types.
  */
 export class BookValueEngine {
     constructor(private readonly transactions: Transaction[]) {}
-
+    
     /**
      * Computes the basis paths for a set of consumed `inputs`, tracing each consumed UTXO
      * backwards through the transaction graph until every branch reaches an origin input.
@@ -31,6 +69,19 @@ export class BookValueEngine {
     }
 
     /**
+     * Traces the cost basis of `quantity` units of a single committed `utxo` back to its origin
+     * inputs, independent of whether the lot has been consumed. Defaults to the lot's full
+     * quantity. Exposed for inspection tooling (e.g. the transaction explorer); the resolution
+     * pipeline uses {@link compute} on actual consumptions instead.
+     *
+     * @param utxo - The output whose basis is being traced.
+     * @param quantity - Portion of `utxo` to trace; defaults to its full `quantity`.
+     */
+    public traceLot(utxo: UTXO, quantity: bigint = utxo.quantity): BasisPath[] {
+        return this.traceUTXO(utxo, quantity);
+    }
+
+    /**
      * Computes the basis paths for `quantity` units of a single `utxo`, tracing backwards
      * through the transaction graph until every branch reaches an origin input.
      *
@@ -41,8 +92,10 @@ export class BookValueEngine {
         return this.traceUTXOFrom(utxo, quantity, new Set());
     }
 
-    /** Decomposes a mixed input array into the {@link UTXOConsumption} `{ source, quantity }` pairs the basis trace operates on. */
+    /** Asserts position uniformity across `inputs`, then filters to the {@link UTXOConsumption} `{ source, quantity }` pairs the basis trace operates on. Non-consumption inputs (origin UTXIs, exchange inputs) carry no consumable lineage and are ignored. */
     private consumedUTXOsFromInputs(inputs: Input[]): { source: UTXO; quantity: bigint }[] {
+        assertPositionUnifiromity({inputs});
+
         return inputs.filter((i): i is UTXOConsumption => i instanceof UTXOConsumption)
             .map(c => ({ source: c.source, quantity: c.quantity }));
     }

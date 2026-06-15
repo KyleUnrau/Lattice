@@ -1,4 +1,4 @@
-import type { ExchangeRecapture } from "../../equity-policy/exchange/types.js";
+import type { Recapture } from "../../equity-policy/recaptures.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
 import type { ResidualAccount } from "../accounts/computed.js";
@@ -43,7 +43,7 @@ export class Exchange {
      *
      * @param quantity - Amount of the to-side to recapture; must not exceed remaining availability.
      */
-    public recapture(quantity: bigint, transactions: Transaction[]): ExchangeRecapture {
+    public recapture(quantity: bigint, transactions: Transaction[]): Recapture {
         const fromQuantity: bigint = this.from.quantity * quantity / this.to.quantity;
 
         return {

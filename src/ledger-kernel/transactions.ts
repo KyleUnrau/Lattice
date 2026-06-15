@@ -1,5 +1,5 @@
 import type { Result } from "../utils.js";
-import type { Position } from "./positions.js";
+import { assertPositionUnifiromity, unscale, type Position } from "./positions.js";
 import { UTXI, UTXOConsumption, type Input } from "./transactions/inputs.js";
 import { UTXIConsumption, UTXO, type Output } from "./transactions/outputs.js";
 
@@ -78,4 +78,16 @@ export class Transaction {
 
         return {ok: true, value: position};
     }
+}
+
+/** Sums the quantities of `nodes` in smallest-unit `bigint`, asserting position uniformity. */
+export function sumNodeQuantityScaled(nodes: Input[] | Output[]): bigint {
+    assertPositionUnifiromity(nodes);
+    return nodes.reduce((sum, o) => sum + o.quantity, 0n);
+}
+
+/** Sums the quantities of `nodes` as a human-readable `number`, asserting position uniformity. */
+export function sumNodeQuantity(nodes: Input[] | Output[]): number {
+    const position = assertPositionUnifiromity(nodes);
+    return unscale(sumNodeQuantityScaled(nodes), position);
 }

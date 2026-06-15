@@ -37,7 +37,7 @@ ledger.newTransaction(
 );
 ```
 
-In practice, `ExchangeResolution` and `swap()` construct these transaction pairs automatically — you rarely build them by hand.
+In practice, `ExchangeResolution` constructs these transaction pairs automatically — you rarely build them by hand.
 
 ---
 
@@ -73,17 +73,56 @@ Residuals are registered directly in a `ResidualAccount` (an equity account), wh
 
 ---
 
-## Three Layers: Primitives, Resolution, Swap
+## Two Layers: Primitives and Resolution
 
-The exchange system is deliberately split into three layers, from lowest to highest. Use the highest one that fits; drop down when you need more control.
+The exchange system is split into two layers. Use the highest one that fits; drop down when you need more control.
 
 | Layer | What it is | Where | Owns transactions? |
 |---|---|---|---|
 | **Exchange primitives** | `Exchange`, `ExchangedUTXO/UTXI`, `ResidualUTXO/UTXI`, `Exchange.recapture` — the kernel-level locked-rate links and their consumption. | `ledger-kernel/transactions/cross-position.ts` | No — they are lines you place into transactions. |
-| **Exchange resolution** | `ExchangeResolution` (built on `computeRecaptureResolution` / `unwind`). Given **only the exchanged portion** of consumed value plus the proceeds, it computes every line — recaptures, the forward exchange, gain/loss residuals, residual-node settlements — and hands them back as arrays. | `equity-policy/exchange/resolution.ts` | No — **you** assemble the transactions. |
-| **`swap()`** | The convenience helper for the clean, full-quantity case. The caller draws `fromInputs` and stages `toOutputs`; `swap` resolves the exchange and builds the downstream transactions, returning `{ fromOutputs, to, intermediates }`. Commit them in order: consuming → hops → receiving. | `equity-policy/exchange/swap.ts` | No — builds `to` and hop transactions but does not commit them; the caller commits all three. |
+| **Exchange resolution** | `ExchangeResolution` — given the consumed `fromInputs` and the pre-generated `toOutputs`, computes every line (recaptures, forward exchange, gain/loss residuals, residual-node settlements) and exposes them via `getFromOutputs()`, `getToInputs()`, `getToOutputs()`, and `constructIntermediateTransactions()`. | `equity-policy/exchange.ts` | No — the caller assembles and commits all transactions. |
 
-`swap()` is the right tool when the entire source draw is exchanged into the entire proceeds and nothing else shares those transactions. The moment that stops being true — a partial exchange, or an event that also has a fee/deposit/withdrawal — reach for `ExchangeResolution` directly and assemble the transactions yourself.
+---
+
+## Using ExchangeResolution
+
+`ExchangeResolution` is the primary entry point for recording an exchange. Pre-generate both sides of the exchange, construct the resolution, then assemble the transactions from the lines it returns.
+
+```ts
+// Pre-generate outputs for the receiving side, then pass them in.
+const fromInputs = cadAccount.generateInputs(cad, 500, ledger.transactions);
+const toOutputs  = usdAccount.generateOutputs(usd, 375, ledger.transactions);
+
+const res = new ExchangeResolution(
+    fromInputs,
+    toOutputs,
+    ledger.transactions,
+    engine,
+    residualAccount,       // ResidualTarget: where to recognize gains/losses
+    cadToUsdPositions      // ExchangeAccount: required; tracks the open position
+);
+
+// Commit in dependency order: consuming → intermediate hops → receiving
+ledger.newTransaction(fromInputs, res.getFromOutputs());
+for (const tx of res.constructIntermediateTransactions()) ledger.addTransaction(tx);
+ledger.newTransaction(res.getToInputs(), res.getToOutputs());
+```
+
+**`getFromOutputs()`** — outputs for the consuming/surface transaction: surface-position recapture settlements, the forward exchange from-side, and closed residual legs.
+
+**`getToInputs()`** — inputs for the receiving/target transaction: target-position recapture reclaims, forward exchange to-side, gain residual, and settled-residual mints.
+
+**`getToOutputs()`** — outputs for the receiving/target transaction: the `toOutputs` passed to the constructor plus any loss residual (when proceeds fall short of recovered basis).
+
+**`constructIntermediateTransactions()`** — returns a `Transaction[]` for each intermediate position crossed by a multi-hop loop unwind. Commit these between the consuming and receiving transactions.
+
+**`constructFromTransaction(additionalNodes?)`** — convenience builder: constructs the consuming transaction from `fromInputs` and `getFromOutputs()`, optionally appending extra inputs/outputs (only when they form a uniform blend — see composition rules below).
+
+**`constructToTransaction(additionalNodes?)`** — convenience builder: constructs the receiving transaction from `getToInputs()` and `getToOutputs()`, optionally appending extra inputs/outputs.
+
+**`residualAccount`** accepts either a single `ResidualAccount` (gains and losses share it) or `{ gain: ResidualAccount, loss: ResidualAccount }` to route them to separate accounts. `gainAccountOf(target)` and `lossAccountOf(target)` (exported from `ledger-kernel/accounts/computed.ts`) extract one side from a `ResidualTarget` when needed.
+
+**`exchangeAccount`** scopes the forward exchange to a specific `ExchangeAccount`'s open-position view. It is **always required** — supply one even when the exchange fully closes a loop and no forward leg opens (the account will simply carry a zero balance). This keeps the type consistent and avoids silently minting an untagged, unscoped open position.
 
 ---
 
@@ -91,21 +130,21 @@ The exchange system is deliberately split into three layers, from lowest to high
 
 `ExchangeResolution` resolves **the exchanged portion only**. Two guarantees follow by construction:
 
-- Its from-side outputs sum to exactly `sum(exchangedInputs)`, and its to-side inputs balance exactly against `actualProceeds`. Every exchange/recapture/residual line links **only** the exchanged value.
+- Its from-side outputs sum to exactly `sum(fromInputs)`, and its to-side inputs balance exactly against the proceeds in `toOutputs`. Every exchange/recapture/residual line links **only** the exchanged value.
 - Everything else in the event is yours to build. Non-exchanged value simply lives in other transactions.
 
 ```ts
-// Exchange 400 of a 500 CAD position into USD; withdraw the other 100 CAD as cash.
-const exchanged = cash.generateInputs(cad, 400, ledger.transactions);
-const res = new ExchangeResolution(exchanged, usd, 300, engine, ledger.transactions,
+// Exchange 400 of a 500 CAD draw into 300 USD; withdraw the other 100 CAD to a drawer account.
+const exchangedInputs = cash.generateInputs(cad, 400, ledger.transactions);
+const toOutputs = cash.generateOutputs(usd, 300, ledger.transactions);
+const res = new ExchangeResolution(exchangedInputs, toOutputs, ledger.transactions, engine,
                                    capitalGains, cadToUsdPositions);
 
 // Consuming (exchange) transaction — exchange lines only:
-ledger.newTransaction(exchanged, res.getFromOutputs());
-res.getIntermediateTransactions().forEach(h => ledger.newTransaction(h.inputs, h.outputs));
-// Receiving (exchange) transaction:
-ledger.newTransaction(res.getToInputs(),
-    [...cash.generateOutputs(usd, 300, ledger.transactions), ...res.getToOutputs()]);
+ledger.newTransaction(exchangedInputs, res.getFromOutputs());
+for (const tx of res.constructIntermediateTransactions()) ledger.addTransaction(tx);
+// Receiving (exchange) transaction — toOutputs already included in getToOutputs():
+ledger.newTransaction(res.getToInputs(), res.getToOutputs());
 
 // The withdrawal is an INDEPENDENT transaction, not extra lines on the one above:
 ledger.newTransaction(cash.generateInputs(cad, 100, ledger.transactions),
@@ -124,42 +163,9 @@ So the rule is: **lines may share a transaction only when they form a single uni
 
 An exchange position is **open** as long as one or both sides have remaining unconsumed availability.
 
-An exchange is **fully settled** when both `ex.from` and `ex.to` have zero remaining availability — both sides have been consumed exactly. A fully settled exchange contributes nothing to `ExchangePositionsAccount`.
+An exchange is **fully settled** when both `ex.from` and `ex.to` have zero remaining availability — both sides have been consumed exactly. A fully settled exchange contributes nothing to `ExchangeAccount`.
 
-The `ExchangePositionsAccount` computed equity account scans every `ExchangedUTXO` and `ExchangedUTXI` across all transactions and derives its balance from remaining availability. This ensures `ledger.verify()` can pass even with open exchange positions — the open portions cancel with matching entries on the asset side.
-
----
-
-## The High-Level API
-
-For the clean, full-quantity case you don't construct exchanges directly — `swap()` handles the full cycle (for partial or mixed events, drop down to `ExchangeResolution` as shown above):
-
-```ts
-const fromInputs = cadAccount.generateInputs(cad, 500, ledger.transactions);
-const toOutputs = usdAccount.generateOutputs(usd, 375, ledger.transactions);
-
-const result = swap({
-    fromInputs, toOutputs, engine,
-    transactions: ledger.transactions,
-    residualAccount: capitalGains,       // where to recognize gains/losses
-    exchangeAccount: cadToUsdPositions   // required; carries zero when no forward leg opens
-});
-
-// Commit in dependency order: consuming → intermediate hops → receiving
-ledger.newTransaction(fromInputs, result.fromOutputs);
-ledger.addTransaction(...result.intermediates, result.to);
-```
-
-`swap()` internally calls `ExchangeResolution`, which:
-1. Traces the provenance of the consumed value via `BookValueEngine`
-2. Identifies which prior exchanges loop back to `usd` and recaptures them
-3. Opens a forward exchange for any portion without prior loop lineage (scoped to the required `exchangeAccount`)
-4. Recognizes any gain/loss as a residual — gains go to the gain account, losses to the loss account (see `ResidualTarget` in [Account System](../architecture/accounts.md))
-5. Returns the resolved lines; `swap()` builds the `to` and hop `Transaction` objects and returns `{ resolution, fromOutputs, to, intermediates }` for the caller to commit
-
-**`residualAccount`** accepts either a single `ResidualAccount` (gains and losses share it) or `{ gain: ResidualAccount, loss: ResidualAccount }` to route them to separate accounts.
-
-**`exchangeAccount`** scopes the forward exchange to a specific `ExchangePositionsAccount`'s open-position view. It is **always required** — supply one even when the exchange fully closes a loop and no forward leg opens (the account will simply carry a zero balance). This keeps the type consistent and avoids any risk of silently minting an untagged, unscoped open position.
+The `ExchangeAccount` computed equity account scans every `ExchangedUTXO` and `ExchangedUTXI` across all transactions and derives its balance from remaining availability. This ensures `ledger.verify()` can pass even with open exchange positions — the open portions cancel with matching entries on the asset side.
 
 See [Unwind Algorithm](../architecture/unwind.md) for the recapture logic, and [Four-Phase Example](../guides/example.md) for a full walkthrough.
 
@@ -170,3 +176,4 @@ See [Unwind Algorithm](../architecture/unwind.md) for the recapture logic, and [
 - [Transaction Primitives](transactions.md) — UTXO/UTXI, the conservation model
 - [Cost Basis Engine](../architecture/cost-basis.md) — How lineage is traced through exchange boundaries
 - [Unwind Algorithm](../architecture/unwind.md) — How loop-mode vs full-mode recapture works
+- [Account System](../architecture/accounts.md) — ResidualAccount, ExchangeAccount, ResidualTarget

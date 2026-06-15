@@ -26,7 +26,7 @@ The equity-policy layer owns **business logic** — decisions about *how* to rec
 - How to handle value that derives from a prior residual lot
 - How to expense value that fully leaves the system
 
-The equity-policy layer calls down into the kernel to create transactions, but the kernel never calls up into equity-policy. The kernel does not know that `ExchangeResolution` or `swap()` exist.
+The equity-policy layer calls down into the kernel to create transactions, but the kernel never calls up into equity-policy. The kernel does not know that `ExchangeResolution` or `ExpenseResolution` exist.
 
 ---
 
@@ -37,7 +37,7 @@ The boundary is enforced by dependency direction: `equity-policy/` imports from 
 Concretely:
 
 - **Kernel**: `positions.ts`, `transactions.ts`, `ledger.ts`, `accounts/`, `transactions/`, `disposal-methods/`
-- **Equity-policy**: `book-value/` (engine, lineage, types), `exchange/` (resolution, recapture, swap, types, index), `recaptures.ts`, `expense.ts`
+- **Equity-policy**: `book-value/` (engine, lineage), `exchange.ts`, `expense.ts`, `recaptures.ts`
 
 ---
 
@@ -52,18 +52,18 @@ The kernel can be tested and reasoned about in isolation. A transaction that bal
 
 ---
 
-## Call Chain for a Typical Swap
+## Call Chain for a Typical Exchange
 
 ```
-swap()                          ← equity-policy entry point
-  └─ ExchangeResolution         ← equity-policy: full resolution
-       ├─ computeRecaptureResolution()  ← equity-policy: recapture math
-       │    ├─ BookValueEngine.compute()  ← equity-policy: basis tracing
-       │    └─ unwind()          ← equity-policy: loop selection
-       └─ ledger.newTransaction() ← kernel: commit each transaction
+ExchangeResolution()            ← equity-policy: computes every exchange/recapture/residual line
+  ├─ BookValueEngine.compute()  ← equity-policy: traces basis of consumed inputs
+  ├─ unwind()                   ← equity-policy/recaptures: selects edges to recapture (loop vs full mode)
+  └─ (lines returned to caller)
+
+caller: ledger.newTransaction() ← kernel: commits each transaction using the lines above
 ```
 
-The kernel's `newTransaction` is called at the bottom of the chain, after all policy decisions are made.
+`ExchangeResolution` computes all the accounting lines but does not commit any transaction itself — the caller assembles and commits them. The kernel's `newTransaction` is always called after all policy decisions are made.
 
 ---
 

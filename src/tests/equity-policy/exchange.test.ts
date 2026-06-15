@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
-import { ExchangeResolution } from "../../equity-policy/exchange/resolution.js";
+import { ExchangeResolution } from "../../equity-policy/exchange.js";
 import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { makeFixture, openInto, commitSwap } from "../utils/ledger-fixture.js";
 
@@ -74,8 +74,8 @@ test("the recovered-loop residual carries proportional origin basis", () => {
     commitSwap(f, f.cash, f.usd, 375, f.inventory, f.oranges, 1500, f.usdToOranges);
     const closing = commitSwap(f, f.inventory, f.oranges, 1500, f.cash, f.cad, 600, f.orangesToCad);
 
-    assert.equal(closing.resolution.residuals.length, 1);
-    const residual = closing.resolution.residuals[0]!;
+    assert.equal(closing.resolution.createdResiduals.length, 1);
+    const residual = closing.resolution.createdResiduals[0]!;
     // The 100 CAD gain traces back through Oranges→USD→CAD to the original CAD opening balance.
     assert.equal(residual.originBasis.get(f.cad), 10000n);
 });
@@ -86,15 +86,13 @@ test("a partial exchange resolves only its portion; the rest is an independent t
 
     // Exchange 400 of the 1000 CAD into 300 USD via the resolution layer (separate transactions).
     const exchangedInputs = f.cash.generateInputs(f.cad, 400, f.ledger.transactions);
-    const res = new ExchangeResolution(exchangedInputs, f.usd, 300, f.engine, f.ledger.transactions,
-                                       { gain: f.capitalGains, loss: f.capitalLosses }, f.cadToUsd);
+    const toOutputs = f.cash.generateOutputs(f.usd, 300, f.ledger.transactions);
+    const res = new ExchangeResolution(exchangedInputs, toOutputs, f.ledger.transactions,
+                                       f.engine, { gain: f.capitalGains, loss: f.capitalLosses }, f.cadToUsd);
 
     f.ledger.newTransaction(exchangedInputs, res.getFromOutputs());
-    for (const hop of res.getIntermediateTransactions()) f.ledger.newTransaction(hop.inputs, hop.outputs);
-    f.ledger.newTransaction(
-        res.getToInputs(),
-        [...f.cash.generateOutputs(f.usd, 300, f.ledger.transactions), ...res.getToOutputs()],
-    );
+    for (const hop of res.constructIntermediateTransactions()) f.ledger.newTransaction(hop.inputs, hop.outputs);
+    f.ledger.newTransaction(res.getToInputs(), res.getToOutputs());
 
     // The forward exchange links ONLY the exchanged 400 CAD ↔ 300 USD.
     assert.notEqual(res.exchange, null);

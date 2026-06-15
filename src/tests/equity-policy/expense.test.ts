@@ -1,14 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { expense } from "../../equity-policy/expense.js";
+import { ExpenseResolution } from "../../equity-policy/expense.js";
 import { commitSwap, makeFixture, openInto } from "../utils/ledger-fixture.js";
 
 // Commits an expense end to end: the consuming/surface transaction plus the hop and
 // expense-recognition transactions the resolution emits.
 function commitExpense(f: ReturnType<typeof makeFixture>, inputs: ReturnType<typeof f.cash.generateInputs>) {
-    const resolution = expense(inputs, f.engine, f.ledger.transactions);
-    f.ledger.newTransaction(inputs, resolution.getFromOutputs(f.exchangeExpense, f.ledger.transactions));
-    resolution.createTransactions(f.exchangeExpense, f.ledger);
+    const resolution = new ExpenseResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
+    f.ledger.newTransaction(inputs, resolution.getFromOutputs());
+    for (const tx of resolution.constructIntermediateTransactions()) f.ledger.addTransaction(tx);
+    for (const tx of resolution.constructExpenseTransactions()) f.ledger.addTransaction(tx);
     return resolution;
 }
 

@@ -67,9 +67,9 @@ For a given `(utxo, quantity)`:
 
 The engine is called by the equity-policy layer, not directly in most user code:
 
-- `ExchangeResolution` calls it via `computeRecaptureResolution` to decide which prior exchanges to recapture when a swap closes a loop
-- `expense()` calls it to trace the full lineage of consumed value, recapturing every edge
-- The REPL exposes `engine.compute(inputs)` directly for inspection
+- `ExchangeResolution` calls it to trace the provenance of the consumed inputs, then feeds the result into `unwind()` to decide which prior exchanges to recapture
+- `ExpenseResolution` calls it to trace the full lineage of consumed value, recapturing every edge to origin
+- `engine.compute(inputs)` can be called directly for inspection (e.g., from the debug REPL or the transaction explorer)
 
 ---
 

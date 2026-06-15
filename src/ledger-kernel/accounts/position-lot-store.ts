@@ -11,7 +11,6 @@ import { UTXO, type Output, type UTXIConsumption } from "../transactions/outputs
  * configured {@link DisposalMethod}s. Not instantiated directly — created on demand by
  * `Account.getLotStore`.
  */
-
 export class PositionLotStore {
     public readonly utxos: UTXO[] = [];
     public readonly utxis: UTXI[] = [];
@@ -22,11 +21,12 @@ export class PositionLotStore {
         public readonly utxiDisposalMethod: DisposalMethod<UTXI>
     ) { }
 
-    public generateInputs(humanValue: number, transactions: Transaction[]): Input[] {
-        return this.generateInputsRaw(scale(humanValue, this.position), transactions);
+    public generateInputs(quantity: number | bigint, transactions: Transaction[]): Input[] {
+        const scaledQuantity: bigint = (typeof quantity === "number") ? scale(quantity, this.position) : quantity;
+        return this.generateInputsScaled(scaledQuantity, transactions);
     }
 
-    public generateInputsRaw(quantity: bigint, transactions: Transaction[]): Input[] {
+    public generateInputsScaled(quantity: bigint, transactions: Transaction[]): Input[] {
         if (quantity <= 0n) throw new Error(`Cannot input a non-positive number from an account`);
 
         const outputTotal: bigint = this.utxos.reduce((sum, utxo) => sum + utxo.calculateAvailable(transactions), 0n);
@@ -51,11 +51,12 @@ export class PositionLotStore {
         } else return consumptions;
     }
 
-    public generateOutputs(humanValue: number, transactions: Transaction[]): Output[] {
-        return this.generateOutputsRaw(scale(humanValue, this.position), transactions);
+    public generateOutputs(quantity: number | bigint, transactions: Transaction[]): Output[] {
+        const scaledQuantity: bigint = (typeof quantity === "number") ? scale(quantity, this.position) : quantity;
+        return this.generateOutputsScaled(scaledQuantity, transactions);
     }
 
-    public generateOutputsRaw(quantity: bigint, transactions: Transaction[]): Output[] {
+    public generateOutputsScaled(quantity: bigint, transactions: Transaction[]): Output[] {
         if (quantity <= 0n) throw new Error(`Cannot output a non-positive number from an account`);
 
         const inputTotal: bigint = this.utxis.reduce((sum, utxi) => sum + utxi.calculateAvailable(transactions), 0n);

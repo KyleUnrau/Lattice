@@ -98,9 +98,9 @@ const capitalLosses = netIncome.addResidualAccount("Capital Losses", Orientation
 swap({ ..., residualAccount: { gain: capitalGains, loss: capitalLosses } });
 ```
 
-Use `gainAccountOf(target)` and `lossAccountOf(target)` (exported from `equity-policy/exchange/index.ts`) when you need to extract one account from a `ResidualTarget` in custom policy code.
+Use `gainAccountOf(target)` and `lossAccountOf(target)` (exported from `ledger-kernel/accounts/computed.ts`) when you need to extract one account from a `ResidualTarget` in custom policy code.
 
-### ExchangePositionsAccount
+### ExchangeAccount
 
 A computed account that scans transactions for remaining `ExchangedUTXO` and `ExchangedUTXI` availability:
 
@@ -132,7 +132,7 @@ When using scoped accounts, every forward exchange should be explicitly tagged t
 
 ## Ledger Verification
 
-`ledger.verify()` checks that for every position, the sum of all canonical balances across `netAssets` and `equity` equals zero (exactly, in `bigint`). Open exchange positions are handled automatically because `ExchangePositionsAccount` is part of the equity tree — no special adjustment is needed.
+`ledger.verify()` checks that for every position, the sum of all canonical balances across `netAssets` and `equity` equals zero (exactly, in `bigint`). Open exchange positions are handled automatically because `ExchangeAccount` is part of the equity tree — no special adjustment is needed.
 
 ---
 

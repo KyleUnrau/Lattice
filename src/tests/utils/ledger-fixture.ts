@@ -1,7 +1,8 @@
 import { BookValueEngine } from "../../equity-policy/book-value/engine.js";
-import { type SwapResult, swap } from "../../equity-policy/exchange/swap.js";
+import { ExchangeResolution } from "../../equity-policy/exchange.js";
+import type { HopTransaction } from "../../equity-policy/recaptures.js";
 import type { Account } from "../../ledger-kernel/accounts/account.js";
-import type { ResidualAccount, ExchangePositionsAccount } from "../../ledger-kernel/accounts/computed.js";
+import type { ResidualAccount, ExchangeAccount } from "../../ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";
 import { fifo } from "../../ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "../../ledger-kernel/ledger.js";
@@ -28,12 +29,12 @@ export interface Fixture {
     exchangeExpense: Account;
     capitalGains: ResidualAccount;
     capitalLosses: ResidualAccount;
-    cadToUsd: ExchangePositionsAccount;
-    usdToOranges: ExchangePositionsAccount;
-    orangesToCad: ExchangePositionsAccount;
-    btcToCad: ExchangePositionsAccount;
-    usdToCad: ExchangePositionsAccount;
-    cadToBtc: ExchangePositionsAccount;
+    cadToUsd: ExchangeAccount;
+    usdToOranges: ExchangeAccount;
+    orangesToCad: ExchangeAccount;
+    btcToCad: ExchangeAccount;
+    usdToCad: ExchangeAccount;
+    cadToBtc: ExchangeAccount;
 }
 
 export function makeFixture(): Fixture {
@@ -81,26 +82,34 @@ export function openInto(f: Fixture, account: Account, position: Position, value
     );
 }
 
+export interface SwapResult {
+    resolution: ExchangeResolution;
+    intermediates: HopTransaction[];
+}
+
 /**
  * Drives a full-quantity, two-account exchange end to end: draws `quantity` of `fromPosition` from
- * `fromAccount`, stages `proceeds` of `toPosition` into `toAccount`, runs {@link swap}, and commits
- * the consuming → hops → receiving chain to the ledger. Returns the {@link SwapResult}.
+ * `fromAccount`, stages `proceeds` of `toPosition` into `toAccount`, runs {@link ExchangeResolution},
+ * and commits the consuming → hops → receiving chain to the ledger. Returns the {@link SwapResult}.
  */
 export function commitSwap(
     f: Fixture,
     fromAccount: Account, fromPosition: Position, quantity: number,
     toAccount: Account, toPosition: Position, proceeds: number,
-    exchangeAccount: ExchangePositionsAccount
+    exchangeAccount: ExchangeAccount
 ): SwapResult {
     const fromInputs = fromAccount.generateInputs(fromPosition, quantity, f.ledger.transactions);
     const toOutputs = toAccount.generateOutputs(toPosition, proceeds, f.ledger.transactions);
 
-    const result = swap({
-        fromInputs, toOutputs, engine: f.engine, transactions: f.ledger.transactions,
-        residualAccount: { gain: f.capitalGains, loss: f.capitalLosses }, exchangeAccount,
-    });
+    const resolution = new ExchangeResolution(
+        fromInputs, toOutputs, f.ledger.transactions,
+        f.engine, { gain: f.capitalGains, loss: f.capitalLosses }, exchangeAccount
+    );
 
-    f.ledger.newTransaction(fromInputs, result.fromOutputs);
-    f.ledger.addTransaction(...result.intermediates, result.to);
-    return result;
+    f.ledger.newTransaction(fromInputs, resolution.getFromOutputs());
+    const intermediates = resolution.getRecaptureHops();
+    for (const hop of intermediates) f.ledger.newTransaction(hop.inputs, hop.outputs);
+    f.ledger.newTransaction(resolution.getToInputs(), resolution.getToOutputs());
+
+    return { resolution, intermediates };
 }

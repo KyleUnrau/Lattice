@@ -1,4 +1,4 @@
-import { ResidualAccount, ExchangePositionsAccount } from "./computed.js";
+import { ResidualAccount, ExchangeAccount } from "./computed.js";
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import type { Orientation } from "../ledger.js";
 import { type Position, unscale } from "../positions.js";
@@ -57,8 +57,8 @@ export class AccountFolder implements AccountNode {
         return child;
     }
 
-    public addExchangeAccount(name: string, localOrientation: Orientation): ExchangePositionsAccount {
-        const child = new ExchangePositionsAccount(name, localOrientation);
+    public addExchangeAccount(name: string, localOrientation: Orientation): ExchangeAccount {
+        const child = new ExchangeAccount(name, localOrientation);
         this.addChild(child);
         return child;
     }
@@ -89,11 +89,11 @@ export class AccountFolder implements AccountNode {
         return result;
     }
 
-    public getBalanceRaw(position: Position, transactions: Transaction[]): bigint {
+    public getBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         return BigInt(this.getEffectiveOrientation()) * this.getSignedBalanceScaled(position, transactions);
     }
 
-    public getBalancesRaw(transactions: Transaction[]): Map<Position, bigint> {
+    public getBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
         for (const [position, signed] of this.getSignedBalancesScaled(transactions))
             result.set(position, BigInt(this.getEffectiveOrientation()) * signed);
@@ -101,12 +101,12 @@ export class AccountFolder implements AccountNode {
     }
 
     public getBalance(position: Position, transactions: Transaction[]): number {
-        return unscale(this.getBalanceRaw(position, transactions), position);
+        return unscale(this.getBalanceScaled(position, transactions), position);
     }
 
     public getBalances(transactions: Transaction[]): Map<Position, number> {
         const result = new Map<Position, number>();
-        for (const [pos, raw] of this.getBalancesRaw(transactions)) result.set(pos, unscale(raw, pos));
+        for (const [pos, raw] of this.getBalancesScaled(transactions)) result.set(pos, unscale(raw, pos));
         return result;
     }
 

@@ -124,8 +124,8 @@ test("INV3: a recovered-loop residual gain inherits proportional BTC origin basi
 
     // KEY INVARIANT: the 50 CAD gain is not basis-free / origin-CAD — it carries the proportional BTC
     // basis of the recaptured path. 50/500 of the loop principal's 0.005 BTC basis = 0.0005 BTC.
-    assert.equal(closing.resolution.residuals.length, 1);
-    const residual = closing.resolution.residuals[0]!;
+    assert.equal(closing.resolution.createdResiduals.length, 1);
+    const residual = closing.resolution.createdResiduals[0]!;
     assert.ok(residual instanceof ResidualUTXI, "a gain is recognized as a ResidualUTXI");
     assert.equal(residual.quantity, 5000n, "50 CAD gain");
     assert.equal(residual.originBasis.get(f.btc), 50000n, "gain inherits 0.0005 BTC origin basis");
@@ -155,8 +155,8 @@ test("INV4: a recovered-loop residual loss is symmetrical and preserves BTC orig
     assert.ok(f.ledger.verify().ok);
 
     // The loss is the mirror of the gain: a ResidualUTXO carrying the same proportional BTC basis.
-    assert.equal(closing.resolution.residuals.length, 1);
-    const residual = closing.resolution.residuals[0]!;
+    assert.equal(closing.resolution.createdResiduals.length, 1);
+    const residual = closing.resolution.createdResiduals[0]!;
     assert.ok(residual instanceof ResidualUTXO, "a loss is recognized as a ResidualUTXO");
     assert.equal(residual.quantity, 5000n, "50 CAD loss");
     assert.equal(residual.originBasis.get(f.btc), 50000n, "loss inherits 0.0005 BTC origin basis");

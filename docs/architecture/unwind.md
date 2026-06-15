@@ -2,7 +2,7 @@
 
 The unwind algorithm decides which exchange edges to recapture when consumed value has prior lineage. It is the core of the equity-policy layer's gain/loss recognition logic.
 
-Entry point: `unwind(basis, stopAt)` in `src/equity-policy/lineage.ts`.
+Entry point: `unwind(basis, stopAt)` in `src/equity-policy/recaptures.ts`.
 
 ---
 
@@ -69,13 +69,15 @@ When consumed inputs include value that originated from a prior `ResidualUTXI` (
 
 ## Helper Functions
 
-| Function | Exported | Purpose |
-|---|---|---|
-| `unwind(basis, stopAt)` | Yes | Main entry point; returns `UnwindPlan` |
-| `collectOriginLeaves(basis)` | Yes | Reduces a basis tree to its terminal origin-position composition |
-| `collectChainEdges(basis, stopAt)` | No (internal) | Recursive edge collector; loop vs full mode |
-| `groupRecapturesByExchange(edges)` | No (internal) | Aggregates `RecaptureEdge[]` by exchange instance |
-| `collectResidualNodes(basis)` | No (internal) | Finds all `ResidualPath` leaves in a basis tree |
+| Function | File | Exported | Purpose |
+|---|---|---|---|
+| `unwind(basis, stopAt)` | `recaptures.ts` | Yes | Main entry point; returns `UnwindPlan` |
+| `executeRecaptures(plan, transactions)` | `recaptures.ts` | Yes | Issues one `Recapture` per exchange in plan |
+| `classifyRecaptures(recaptures, surface)` | `recaptures.ts` | Yes | Partitions recaptures into surface settlements, hops, and terminal reclaims |
+| `collectOriginLeaves(basis)` | `book-value/lineage.ts` | Yes | Reduces a basis tree to its terminal origin-position composition |
+| `collectChainEdges(basis, stopAt)` | `book-value/lineage.ts` | No (internal) | Recursive edge collector; loop vs full mode |
+| `groupRecapturesByExchange(edges)` | `book-value/lineage.ts` | No (internal) | Aggregates `RecaptureEdge[]` by exchange instance |
+| `collectResidualNodes(basis)` | `book-value/lineage.ts` | No (internal) | Finds all `ResidualPath` leaves in a basis tree |
 
 ---
 

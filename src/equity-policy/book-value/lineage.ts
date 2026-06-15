@@ -1,4 +1,4 @@
-import type { BasisPath, ResidualPath } from "./types.js";
+import type { BasisPath, ResidualPath } from "./engine.js";
 import type { Position } from "../../ledger-kernel/positions.js";
 import type { Exchange } from "../../ledger-kernel/transactions/cross-position.js";
 
@@ -11,19 +11,6 @@ export type RecaptureEdge = {
     toQuantity: bigint;
     fromQuantity: bigint;
 };
-
-/**
- * The result of unwinding a basis tree: which exchange edges to recapture (one entry per
- * distinct exchange, with summed quantities), the basis amounts recovered at the recovery
- * points, the surface-position quantity that participated in a recovery (the proration
- * weight), and the terminal residual nodes in the consumed lineage.
- */
-export interface UnwindPlan {
-    recaptures: Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }>;
-    recovered: Map<Position, bigint>;
-    loopedSurfaceQuantity: bigint;
-    residualNodes: ResidualPath[];
-}
 
 /**
  * Recursively walks a {@link BasisPath} tree and selects the exchange edges to recapture,
@@ -46,7 +33,7 @@ export interface UnwindPlan {
  * point, expressed in this level's own position — at the top level that is the surface position,
  * which is the correct proration weight for splitting proceeds.
  */
-function collectChainEdges(
+export function collectChainEdges(
     basis: BasisPath[],
     stopAt: Position | null
 ): { edges: RecaptureEdge[]; recovered: Map<Position, bigint>; loopedQuantity: bigint; } {
@@ -111,7 +98,7 @@ function collectChainEdges(
  * quantities across all edges sharing the same exchange. Ensures each exchange is recaptured
  * exactly once even when its lineage appears across multiple consumed UTXOs or branches.
  */
-function groupRecapturesByExchange(edges: RecaptureEdge[]): Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }> {
+export function groupRecapturesByExchange(edges: RecaptureEdge[]): Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }> {
     const grouped = new Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }>();
     for (const edge of edges) {
         const existing = grouped.get(edge.exchange) ?? { toQuantity: 0n, fromQuantity: 0n };
@@ -128,7 +115,7 @@ function groupRecapturesByExchange(edges: RecaptureEdge[]): Map<Exchange, { toQu
  * consumed value. Recurses through exchange nodes (a residual can sit behind a later exchange);
  * residual nodes are terminal and not recursed into.
  */
-function collectResidualNodes(basis: BasisPath[]): ResidualPath[] {
+export function collectResidualNodes(basis: BasisPath[]): ResidualPath[] {
     const result: ResidualPath[] = [];
     for (const path of basis) {
         if (path.type === "residual") result.push(path);
@@ -155,21 +142,4 @@ export function collectOriginLeaves(basis: BasisPath[]): Map<Position, bigint> {
     }
 
     return result;
-}
-
-/**
- * Unwinds a consumed basis tree into a recapture plan. See {@link collectChainEdges} for the
- * loop-vs-forward and full-unwind semantics.
- *
- * @param basis - The basis tree of the consumed value (from {@link BookValueEngine.compute}).
- * @param stopAt - The proceeds/target position for loop mode, or `null` for a full unwind to origin.
- */
-export function unwind(basis: BasisPath[], stopAt: Position | null): UnwindPlan {
-    const { edges, recovered, loopedQuantity } = collectChainEdges(basis, stopAt);
-    return {
-        recaptures: groupRecapturesByExchange(edges),
-        recovered,
-        loopedSurfaceQuantity: loopedQuantity,
-        residualNodes: collectResidualNodes(basis),
-    };
 }

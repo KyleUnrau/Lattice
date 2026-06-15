@@ -12,11 +12,10 @@ The system enforces double-entry conservation at every transaction, models value
 
 ```bash
 npm install
-npm run build
-npm start
+npm run explore
 ```
 
-`npm start` opens an interactive REPL with the full ledger state in scope. See [Getting Started](docs/guides/getting-started.md) for available variables and example commands.
+`npm run explore` compiles and starts the web-based transaction explorer at `http://localhost:4000`. See [Getting Started](docs/guides/getting-started.md) for the debug REPL and other options.
 
 ---
 

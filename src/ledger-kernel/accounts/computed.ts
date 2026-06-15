@@ -31,11 +31,11 @@ export abstract class ComputedAccount implements AccountNode {
     public abstract getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint;
     public abstract getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint>;
 
-    public getBalanceRaw(position: Position, transactions: Transaction[]): bigint {
+    public getBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         return BigInt(this.getEffectiveOrientation()) * this.getSignedBalanceScaled(position, transactions);
     }
 
-    public getBalancesRaw(transactions: Transaction[]): Map<Position, bigint> {
+    public getBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
         const result = new Map<Position, bigint>();
         for (const [position, signed] of this.getSignedBalancesScaled(transactions))
             result.set(position, BigInt(this.getEffectiveOrientation()) * signed);
@@ -43,12 +43,12 @@ export abstract class ComputedAccount implements AccountNode {
     }
 
     public getBalance(position: Position, transactions: Transaction[]): number {
-        return unscale(this.getBalanceRaw(position, transactions), position);
+        return unscale(this.getBalanceScaled(position, transactions), position);
     }
 
     public getBalances(transactions: Transaction[]): Map<Position, number> {
         const result = new Map<Position, number>();
-        for (const [pos, raw] of this.getBalancesRaw(transactions)) result.set(pos, unscale(raw, pos));
+        for (const [pos, raw] of this.getBalancesScaled(transactions)) result.set(pos, unscale(raw, pos));
         return result;
     }
 
@@ -66,7 +66,7 @@ export abstract class ComputedAccount implements AccountNode {
  * Adding this as a child of the equity folder ensures `equity.getSignedBalancesScaled()` includes
  * open positions automatically — no adjustment is needed inside `ledger.verify()`.
  */
-export class ExchangePositionsAccount extends ComputedAccount implements ExchangeAccountMarker {
+export class ExchangeAccount extends ComputedAccount implements ExchangeAccountMarker {
     public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         let balance = 0n;
         for (const tx of transactions) {
@@ -103,11 +103,11 @@ export class ExchangePositionsAccount extends ComputedAccount implements Exchang
 
 /**
  * Tracks recognized gains and losses from exchanges as an equity account. Unlike the scan-based
- * {@link ExchangePositionsAccount}, this account owns its residual lots directly — each
+ * {@link ExchangeAccount}, this account owns its residual lots directly — each
  * {@link ResidualUTXI} (gain) and {@link ResidualUTXO} (loss) is registered here via
- * {@link addResidualInput} / {@link addResidualOutput}, called by the `exchange()` equity-policy
- * function. Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains", "Profit") can coexist
- * without crosstalk because each owns its own lot lists.
+ * {@link addResidualInput} / {@link addResidualOutput}, called by {@link ExchangeResolution} and
+ * {@link ExpenseResolution}. Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains", "Profit")
+ * can coexist without crosstalk because each owns its own lot lists.
  *
  * Gains reduce the root balance (increasing equity inside a positive-orientation equity folder
  * like netIncome); losses increase it.
@@ -164,4 +164,21 @@ export class ResidualAccount extends ComputedAccount {
         }
         return result;
     }
+}
+
+/**
+ * Either a single {@link ResidualAccount} that receives both gains and losses, or a pair that
+ * separates them — pass `{ gain, loss }` to route e.g. "Capital Gains" and "Capital Losses"
+ * to distinct accounts. All equity-policy functions accept this union transparently.
+ */
+export type ResidualTarget = ResidualAccount | { gain: ResidualAccount; loss: ResidualAccount; };
+
+/** Returns the account that should receive gain residuals from `target`. */
+export function gainAccountOf(target: ResidualTarget): ResidualAccount {
+    return target instanceof ResidualAccount ? target : target.gain;
+}
+
+/** Returns the account that should receive loss residuals from `target`. */
+export function lossAccountOf(target: ResidualTarget): ResidualAccount {
+    return target instanceof ResidualAccount ? target : target.loss;
 }

@@ -1,40 +1,62 @@
-import type { Position } from "../ledger-kernel/positions.js";
+import { type Position } from "../ledger-kernel/positions.js";
 import type { Transaction } from "../ledger-kernel/transactions.js";
-import { UTXOConsumption, type Input } from "../ledger-kernel/transactions/inputs.js";
-import type { UTXIConsumption } from "../ledger-kernel/transactions/outputs.js";
-import type { UnwindPlan } from "./book-value/lineage.js";
-import type { ExchangeRecapture, HopTransaction } from "./exchange/types.js";
+import type { Exchange } from "../ledger-kernel/transactions/cross-position.js";
+import type { Input, UTXOConsumption } from "../ledger-kernel/transactions/inputs.js";
+import type { Output, UTXIConsumption } from "../ledger-kernel/transactions/outputs.js";
+import { collectChainEdges, groupRecapturesByExchange, collectResidualNodes } from "./book-value/lineage.js";
+import type { BasisPath, ResidualPath } from "./book-value/engine.js";
 
-/**
- * Shared recapture-plan primitives used by both the exchange-resolution layer
- * ({@link computeRecaptureResolution}) and the {@link expense} layer. These turn an
- * {@link UnwindPlan} into executed, position-classified {@link ExchangeRecapture}s; the
- * proceeds-vs-origin policy on top of them differs per use case and lives in those layers.
- */
-
-/** The surface (consumed) position being spent and the total quantity consumed across `inputs`. */
-export interface ConsumptionSummary {
-    /** Position of the consumed UTXOs, or `undefined` when `inputs` contains no consumptions. */
-    surfacePosition: Position | undefined;
-    /** Summed quantity of the consumed UTXOs. */
-    totalConsumed: bigint;
+/** A single-position settlement transaction emitted as part of a multi-hop unwind. */
+export interface HopTransaction {
+    position: Position;
+    inputs: Input[];
+    outputs: Output[];
 }
 
-/** Summarizes the consumed portion of `inputs`: which position is being spent and how much. */
-export function summarizeConsumption(inputs: Input[]): ConsumptionSummary {
-    const consumptions = inputs.filter((i): i is UTXOConsumption => i instanceof UTXOConsumption);
+/**
+ * The result of unwinding a basis tree: which exchange edges to recapture (one entry per
+ * distinct exchange, with summed quantities), the basis amounts recovered at the recovery
+ * points, the surface-position quantity that participated in a recovery (the proration
+ * weight), and the terminal residual nodes in the consumed lineage.
+ */
+export interface UnwindPlan {
+    recaptures: Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }>;
+    recovered: Map<Position, bigint>;
+    loopedSurfaceQuantity: bigint;
+    residualNodes: ResidualPath[];
+}
+
+/**
+ * Unwinds a consumed basis tree into a recapture plan. See {@link collectChainEdges} for the
+ * loop-vs-forward and full-unwind semantics.
+ *
+ * @param basis - The basis tree of the consumed value (from {@link BookValueEngine.compute}).
+ * @param stopAt - The proceeds/target position for loop mode, or `null` for a full unwind to origin.
+ */
+export function unwind(basis: BasisPath[], stopAt: Position | null): UnwindPlan {
+    const { edges, recovered, loopedQuantity } = collectChainEdges(basis, stopAt);
     return {
-        surfacePosition: consumptions[0]?.source.position,
-        totalConsumed: consumptions.reduce((sum, c) => sum + c.quantity, 0n),
+        recaptures: groupRecapturesByExchange(edges),
+        recovered,
+        loopedSurfaceQuantity: loopedQuantity,
+        residualNodes: collectResidualNodes(basis),
     };
 }
 
+/** The paired outputs of {@link Exchange.recapture} — the two sides of a locked-rate reversal. */
+export interface Recapture {
+    /** {@link UTXIConsumption} settling the to-side of the original exchange. Goes in a transaction's outputs. */
+    settlement: UTXIConsumption;
+    /** {@link UTXOConsumption} reclaiming the from-side of the original exchange. Goes in a transaction's inputs. */
+    reclaim: UTXOConsumption;
+}
+
 /**
- * Issues one {@link ExchangeRecapture} per distinct exchange in `plan`, at the plan's grouped
+ * Issues one {@link Recapture} per distinct exchange in `plan`, at the plan's grouped
  * to-side quantity. Zero-quantity edges are skipped.
  */
-export function executeRecaptures(plan: UnwindPlan, transactions: Transaction[]): ExchangeRecapture[] {
-    const recaptures: ExchangeRecapture[] = [];
+export function executeRecaptures(plan: UnwindPlan, transactions: Transaction[]): Recapture[] {
+    const recaptures: Recapture[] = [];
     for (const [exchange, { toQuantity }] of plan.recaptures) {
         if (toQuantity <= 0n) continue;
         recaptures.push(exchange.recapture(toQuantity, transactions));
@@ -46,10 +68,12 @@ export function executeRecaptures(plan: UnwindPlan, transactions: Transaction[])
 export interface RecaptureClassification {
     /** Settlements landing in the surface position — belong in the consuming transaction. */
     surfaceSettlements: UTXIConsumption[];
+    /** Summed quantity of {@link surfaceSettlements}; pre-computed so callers avoid a redundant reduce. */
+    surfaceSettled: bigint;
     /** Intermediate positions crossed by a multi-hop unwind; each transaction nets to zero. */
     hops: HopTransaction[];
     /** Recaptures reclaiming value at a terminal (non-hop) position, keyed by that position. */
-    terminalReclaims: Map<Position, ExchangeRecapture[]>;
+    terminalReclaims: Map<Position, Recapture[]>;
 }
 
 /**
@@ -62,10 +86,10 @@ export interface RecaptureClassification {
  * - a position that is reclaimed but not settled is a **terminal reclaim** (an origin for a full
  *   unwind, the target for a loop closure).
  */
-export function classifyRecaptures(recaptures: ExchangeRecapture[], surfacePosition: Position): RecaptureClassification {
-    const reclaims = new Map<Position, ExchangeRecapture[]>(); // recapture.reclaim reclaims value into this position
-    const settles = new Map<Position, ExchangeRecapture[]>();  // recapture.settlement settles value in this position
-    const add = (map: Map<Position, ExchangeRecapture[]>, position: Position, recapture: ExchangeRecapture): void => {
+export function classifyRecaptures(recaptures: Recapture[], surfacePosition: Position): RecaptureClassification {
+    const reclaims = new Map<Position, Recapture[]>(); // recapture.reclaim reclaims value into this position
+    const settles = new Map<Position, Recapture[]>();  // recapture.settlement settles value in this position
+    const add = (map: Map<Position, Recapture[]>, position: Position, recapture: Recapture): void => {
         const group = map.get(position);
         if (group) group.push(recapture);
         else map.set(position, [recapture]);
@@ -76,7 +100,7 @@ export function classifyRecaptures(recaptures: ExchangeRecapture[], surfacePosit
     }
 
     const hops: HopTransaction[] = [];
-    const terminalReclaims = new Map<Position, ExchangeRecapture[]>();
+    const terminalReclaims = new Map<Position, Recapture[]>();
     for (const [position, group] of reclaims) {
         if (settles.has(position) && position !== surfacePosition) {
             hops.push({ position, inputs: group.map(r => r.reclaim), outputs: settles.get(position)!.map(r => r.settlement) });
@@ -86,5 +110,6 @@ export function classifyRecaptures(recaptures: ExchangeRecapture[], surfacePosit
     }
 
     const surfaceSettlements = (settles.get(surfacePosition) ?? []).map(r => r.settlement);
-    return { surfaceSettlements, hops, terminalReclaims };
+    const surfaceSettled = surfaceSettlements.reduce((s, o) => s + o.quantity, 0n);
+    return { surfaceSettlements, surfaceSettled, hops, terminalReclaims };
 }

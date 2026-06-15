@@ -14,85 +14,47 @@ npm run build
 
 The build compiles TypeScript from `src/` to `dist/` using the configuration in `tsconfig.json`.
 
-## Run the Interactive REPL
+## Transaction Explorer
 
 ```bash
-npm start
+npm run explore
 ```
 
-This starts an interactive Node.js REPL with the full ledger state and all named variables from `src/main.ts` available in scope.
+Compiles and starts the web-based transaction explorer at `http://localhost:4000`. The explorer loads the scenario defined in `src/scenario.ts`, then serves a single-page UI and a small read-only JSON API (`/api/state`, `/api/tx/:n`, `/api/lot/:id`, `/api/exchange/:id`). Every endpoint accepts an `upTo` query parameter so balances, availability, and basis reflect the ledger state after the first `upTo` transactions.
 
-## REPL Context
+## Debug REPL
 
-All of the following are available without any prefix:
+```bash
+npm run debug
+```
 
-**Positions:** `cad`, `usd`, `oranges`
+Starts a Node.js process with `--inspect` that runs an interactive REPL via `src/debug.ts`. All of the following are available without any prefix:
 
-**Accounts:** `cash`, `inventory`, `wallet`, `openingBalance`, `exchangeExpense`, `capitalGains`, `capitalLosses`
+**Scenario:** `ledger`, `engine`, `positions`, `accounts`, `phases`, `buildSampleLedger`
 
-**Exchange position accounts:** `cadToUsdPositions`, `usdToOrangesPositions`, `orangesToCadPositions`
+**Equity-policy classes:** `ExchangeResolution`, `ExpenseResolution`
 
-**Account folders:** `netAssets`, `equity`, `assets`, `currentAssets`, `netIncome`, `expenses`
+**Equity-policy functions:** `unwind`
 
-**Infrastructure:** `ledger`, `engine`
+**Kernel constructors:** `Account`, `AccountFolder`, `Ledger`, `Orientation`, `Transaction`, `Exchange`, `BookValueEngine`
 
-**Phase functions:** `phase0()`, `phase1()`, `phase2()`, `phase3()`
+**Utilities:** `fifo`, `scale`, `unscale`, `clear`
 
-**Equity-policy functions:** `swap`, `expense`, `ExchangeResolution`, `computeRecaptureResolution`, `unwind`
-
-**Residual routing helpers:** `gainAccountOf`, `lossAccountOf`
-
-**Utilities:** `dump`, `write`, `scale`, `unscale`, `formatQuantity`, `muldiv`
-
-**Constructors:** `Account`, `AccountFolder`, `Ledger`, `Orientation`, `Transaction`, `UTXO`, `UTXI`, `UTXOConsumption`, `Exchange`, `BookValueEngine`
-
-## Basic Session
+## Basic REPL Session
 
 ```
-> phase0()      // Opening balance: 1000 CAD into cash
-> phase1()      // Exchange 500 CAD → 375 USD (tagged to cadToUsdPositions)
-> phase2()      // Exchange 375 USD → 1500 Oranges (tagged to usdToOrangesPositions)
-> phase3()      // Sell 1500 Oranges → 600 CAD (closes the CAD→USD→Oranges→CAD loop)
-
+> buildSampleLedger()    // Runs the scenario and returns a LedgerView
 > ledger.verify()
 // { ok: true }
-
-> cash.getBalances(ledger.transactions)
-// Shows cash account balances per position
-
-// Gains land in capitalGains (ResidualUTXI → negative canonical); losses in capitalLosses (ResidualUTXO → positive canonical)
-> capitalGains.getSignedBalanceScaled(cad, ledger.transactions)
-// -10000n  (100.00 CAD gain as ResidualUTXI; signed = UTXO − UTXI, so UTXI gives negative canonical)
-> capitalGains.getBalance(cad, ledger.transactions)
-// 100  (oriented = effectiveOrientation(-1) × signed(-10000n) → positive)
-
-> cadToUsdPositions.getSignedBalancesScaled(ledger.transactions)
-// After phase1 (before phase3): Map { cad => 50000n, usd => -37500n }
-// After phase3: empty Map (exchange settled)
-
-> usdToOrangesPositions.getSignedBalancesScaled(ledger.transactions)
-// After phase2 (before phase3): Map { usd => 37500n, oranges => -1500n }
-// After phase3: empty Map (exchange settled)
 ```
 
-## Inspecting Basis
+## Running Tests
 
-```
-// After phase3, inspect where some CAD in cash came from
-> const utxo = /* some UTXO from cash */
-> dump(engine.compute([new UTXOConsumption(someQuantity, utxo)]))
+```bash
+npm test
 ```
 
-`dump(value)` produces a deep-inspected, human-readable string. `write(value)` writes the same to `output.txt`.
-
-## Phase Function Signatures
-
-`phase3` accepts an optional proceeds argument to experiment with different gain/loss scenarios:
-
-```
-> phase3(700)   // sell oranges for 700 CAD instead — larger gain
-> phase3(450)   // sell for 450 CAD — a loss
-```
+Compiles and runs the full test suite under `src/tests/`. Tests are written using Node's built-in `node:test` runner.
 
 ---
 
