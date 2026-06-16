@@ -6,13 +6,15 @@ These are the hard constraints enforced by the kernel. They hold unconditionally
 |---|---|
 | Single position per transaction | `Transaction` constructor throws on position mismatch |
 | `sum(inputs) === sum(outputs)` | `Transaction` constructor throws on imbalance |
-| UTXO availability never over-consumed | `UTXO.consume()` checks against `calculateAvailable()` |
-| UTXI availability never over-consumed | `UTXI.consume()` checks against `calculateAvailable()` |
+| UTXO availability never over-consumed | Three layers: `UTXO.consume()` during generation; the **aggregate per-source** check in the `Transaction` constructor (sums all consumptions of one lot, so two draws of the same lot can't each pass individually yet over-consume together); and the lot-availability backstop in `Ledger.verify()` |
+| UTXI availability never over-consumed | Same three layers via `UTXI.consume()`, the `Transaction` constructor, and `Ledger.verify()` |
+| No lot has negative availability | `Ledger.verify()` walks every `Account` lot store and rejects the ledger if any `UTXO`/`UTXI` has `calculateAvailable() < 0` — catches over-consumption smeared across separately-constructed transactions in one batch, which the per-transaction check cannot see |
 | Ledger nets to zero per position | `Ledger.verify()` including `ExchangePositionsAccount` and `ResidualAccount` in equity |
 | Book value traversal is acyclic | Per-branch visited set in `BookValueEngine` |
 | `ExchangePositionsAccount` is read-only | Extends `ComputedAccount` — no `generateInputs()`/`generateOutputs()` |
 | `ResidualAccount` is write-once per lot | Lots registered via `addResidualInput/Output`; the equity-policy layer is the only caller |
 | Exchange positions settle only via recapture | `ExchangedUTXO`/`ExchangedUTXI` can only be consumed through `Exchange.recapture()` |
+| Transaction groups are a non-authoritative overlay | `TransactionGroup` holds references (by identity) to transactions already in `Ledger.transactions`; it never affects availability, lineage, or `verify()`. The flat history stays the single source of truth — see [Transaction Groups](../concepts/transaction-groups.md) |
 
 ---
 
@@ -44,7 +46,10 @@ The following are decided by the equity-policy layer and can vary without violat
 
 ## Verification
 
-`ledger.verify()` returns `{ ok: true }` or `{ ok: false, error: string }`. It checks the sum of all root balances across both root account folders equals zero for every position.
+`ledger.verify()` returns `{ ok: true }` or `{ ok: false, error: string }`. It performs two checks:
+
+1. **Zero-sum** — the sum of all root balances across both root account folders equals zero for every position.
+2. **Lot availability** — no `UTXO` or `UTXI` in any `Account` lot store has been over-consumed (`calculateAvailable() ≥ 0`). This backstops over-consumption that is spread across separately-constructed transactions in a single batch (e.g. a multi-transaction exchange resolution), which the per-transaction aggregate check in the `Transaction` constructor cannot detect on its own.
 
 Open exchange positions are handled structurally — `ExchangePositionsAccount` and `ResidualAccount` are part of the equity tree and contribute their derived balances to the sum. No special adjustment is needed inside `verify()`.
 

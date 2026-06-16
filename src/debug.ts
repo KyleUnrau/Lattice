@@ -10,17 +10,17 @@ import { Account } from "./ledger-kernel/accounts/account.js";
 import { Exchange } from "./ledger-kernel/transactions/cross-position.js";
 import { BookValueEngine } from "./equity-policy/book-value/engine.js";
 import { unwind } from "./equity-policy/recaptures.js";
-import { ScenarioExpensesCase1 } from "./scenarios.js";
+import { ScenarioLedger } from "./scenarios.js";
 import { ExchangeResolution } from "./equity-policy/exchange.js";
 import { ExpenseResolution } from "./equity-policy/expense.js";
 
 runCLI({
-    ledger: ScenarioExpensesCase1.ledger,
-    engine: ScenarioExpensesCase1.engine,
-    positions: ScenarioExpensesCase1.positions,
-    accounts: ScenarioExpensesCase1.accounts,
-    phases: ScenarioExpensesCase1.phases,
-    buildSampleLedger: ScenarioExpensesCase1.buildSampleLedger,
+    ledger: ScenarioLedger.ledger,
+    engine: ScenarioLedger.engine,
+    positions: ScenarioLedger.positions,
+    accounts: ScenarioLedger.accounts,
+    events: ScenarioLedger.events,
+    buildSampleLedger: ScenarioLedger.buildSampleLedger,
     fifo,
     clear,
     Account,

@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Registry } from "./registry.js";
 import { buildState, buildTransaction, buildLot, buildExchange } from "./serialize.js";
 import { PAGE } from "./web.js";
-import { ScenarioExpensesCase1, type LedgerView } from "../../scenarios.js";
+import { ScenarioLedger, type LedgerView } from "../../scenarios.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -76,4 +76,4 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 // Start with the bundled sample ledger when run directly.
-startExplorer(ScenarioExpensesCase1.buildSampleLedger());
+startExplorer(ScenarioLedger.buildSampleLedger());

@@ -1,5 +1,5 @@
 import type { Position } from "../positions.js";
-import type { Transaction } from "../transactions.js";
+import type { TransactionLike } from "../transactions.js";
 import { UTXIConsumption, type UTXO } from "./outputs.js";
 
 export type Input = UTXI | UTXOConsumption;
@@ -22,7 +22,7 @@ export class UTXI {
     }
 
     /** Returns all {@link UTXIConsumption}s referencing this UTXI across the transaction history. */
-    public getConsumptions(transactions: Transaction[]): UTXIConsumption[] {
+    public getConsumptions(transactions: readonly TransactionLike[]): UTXIConsumption[] {
         const consumptions: UTXIConsumption[] = [];
 
         for (const transaction of transactions) {
@@ -35,7 +35,7 @@ export class UTXI {
     }
 
     /** Remaining quantity not yet settled by any {@link UTXIConsumption} in the history. */
-    public calculateAvailable(transactions: Transaction[]): bigint {
+    public calculateAvailable(transactions: readonly TransactionLike[]): bigint {
         let available: bigint = this.quantity;
         for (const consumption of this.getConsumptions(transactions)) available -= consumption.quantity;
         return available;
@@ -46,7 +46,7 @@ export class UTXI {
      * `transactions`. A generated-but-not-yet-committed lot returns `false`, so balances exclude it
      * until the transaction that introduces it is appended to the ledger.
      */
-    public isCommitted(transactions: Transaction[]): boolean {
+    public isCommitted(transactions: readonly TransactionLike[]): boolean {
         return transactions.some(transaction => transaction.inputs.includes(this));
     }
 
@@ -54,7 +54,7 @@ export class UTXI {
      * Creates a {@link UTXIConsumption} for `quantity` units, asserting the available balance
      * is sufficient. The returned object must be placed in a transaction's outputs.
      */
-    public consume(quantity: bigint, transactions: Transaction[]): UTXIConsumption {
+    public consume(quantity: bigint, transactions: readonly TransactionLike[]): UTXIConsumption {
         if (quantity < 0n) throw new Error(`Attempted to consume a negative number from a UTXI`);
 
         const available: bigint = this.calculateAvailable(transactions);

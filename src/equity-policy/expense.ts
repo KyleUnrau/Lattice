@@ -1,6 +1,7 @@
 import type { BookValueEngine } from "./book-value/engine.js";
 import { assertPositionUnifiromity, type Position } from "../ledger-kernel/positions.js";
 import { sumNodeQuantityScaled, Transaction } from "../ledger-kernel/transactions.js";
+import { TransactionGroup } from "../ledger-kernel/transactions.js";
 import { ResidualUTXI } from "../ledger-kernel/transactions/cross-position.js";
 import { ResidualAccount } from "../ledger-kernel/accounts/computed.js";
 import type { Input } from "../ledger-kernel/transactions/inputs.js";
@@ -27,16 +28,24 @@ export type ExpenseRecapturedGroup = {
 export class ExpenseTransactions {
     constructor(
         public readonly from: Transaction,
-        public readonly intermediates: Transaction[],
-        public readonly externalExpenses: Transaction[]
+        public readonly intermediates: TransactionGroup,
+        public readonly externalExpenses: TransactionGroup,
+        public readonly resolution: ExpenseResolution
     ) {}
 
+    /**
+     * The role-annotated {@link TransactionGroup} for this expense. Member order matches
+     * {@link flatten} exactly, so committing the group reproduces the same history.
+     */
+    public toGroup(): TransactionGroup {
+        const members: (Transaction | TransactionGroup)[] = [this.from];
+        if (this.intermediates.members.length !== 0) members.push(this.intermediates);
+        if (this.externalExpenses.members.length !== 0) members.push(this.externalExpenses);
+        return new TransactionGroup(members);
+    }
+
     public flatten(): Transaction[] {
-        return [
-            this.from,
-            ...this.intermediates,
-            ...this.externalExpenses
-        ];
+        return this.toGroup().flatten();
     }
 }
 
@@ -203,8 +212,8 @@ export class ExpenseResolution {
      * gets one balanced transaction reclaiming the inner edge's from-side and settling the next
      * edge's to-side (netting to zero). Commit these after the consuming transaction.
      */
-    public constructIntermediateTransactions(): Transaction[] {
-        return this.hops.map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions));
+    public constructIntermediateTransactions(): TransactionGroup {
+        return new TransactionGroup(this.hops.map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions)));
     }
 
     /**
@@ -212,15 +221,16 @@ export class ExpenseResolution {
      * origin amount → expense output in that position) and one per settled-residual recognition
      * (recognized capital-gain lot → expense output). Commit these last.
      */
-    public constructExpenseTransactions(): Transaction[] {
-        return this.expenseEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions));
+    public constructExpenseTransactions(): TransactionGroup {
+        return new TransactionGroup(this.expenseEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions)));
     }
 
     public constructTransactions(additionalNodes?: {inputs: Input[]; outputs: Output[]}): ExpenseTransactions {
         return new ExpenseTransactions(
             this.constructFromTransaction(additionalNodes),
             this.constructIntermediateTransactions(),
-            this.constructExpenseTransactions()
+            this.constructExpenseTransactions(),
+            this
         );
     }
 }

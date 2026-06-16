@@ -1,6 +1,6 @@
 import { UTXO } from "../transactions/outputs.js";
 import { UTXI } from "../transactions/inputs.js";
-import type { Transaction } from "../transactions.js";
+import type { TransactionLike } from "../transactions.js";
 
 /**
  * First-in-first-out {@link DisposalMethod}. Consumes the oldest available lots first,
@@ -10,7 +10,7 @@ import type { Transaction } from "../transactions.js";
 export const fifo = <T extends UTXO | UTXI>(
     components: T[],
     quantity: bigint,
-    transactions: Transaction[]
+    transactions: readonly TransactionLike[]
 ): Map<T, bigint> => {
     if (quantity < 0n) throw new Error(`Attempted to invoke FIFO disposal method with a negative quantity`);
 

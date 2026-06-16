@@ -3,7 +3,7 @@ import { AccountFolder } from "./folder.js";
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import type { Orientation } from "../ledger.js";
 import { type Position, unscale } from "../positions.js";
-import type { Transaction } from "../transactions.js";
+import type { Transaction, TransactionLike } from "../transactions.js";
 import type { UTXI, Input } from "../transactions/inputs.js";
 import type { UTXO, Output } from "../transactions/outputs.js";
 import type { AccountNode } from "./node.js";
@@ -70,11 +70,11 @@ export class Account implements AccountNode {
         return this.lotStores.get(position)!;
     }
 
-    public generateInputs(position: Position, quantity: number | bigint, transactions: Transaction[]): Input[] {
+    public generateInputs(position: Position, quantity: number | bigint, transactions: readonly TransactionLike[]): Input[] {
         return this.getLotStore(position).generateInputs(quantity, transactions);
     }
 
-    public generateOutputs(position: Position, quantity: number | bigint, transactions: Transaction[]): Output[] {
+    public generateOutputs(position: Position, quantity: number | bigint, transactions: readonly TransactionLike[]): Output[] {
         return this.getLotStore(position).generateOutputs(quantity, transactions);
     }
 

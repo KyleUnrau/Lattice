@@ -29,6 +29,8 @@ const cash = currentAssets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, 
 
 The `transactions` parameter is required because lot availability is computed dynamically by scanning history — there is no cached balance state.
 
+> **Generating more than once before commit:** calling `generateInputs`/`generateOutputs` twice for the same account + position off raw `ledger.transactions` double-counts the lots, since the first call's consumptions aren't committed yet. Use `ledger.beginGeneration()` to obtain a `GenerationContext` whose `generateInputs(account, …)` / `generateOutputs(account, …)` keep availability accurate across the calls. See [Transaction Primitives → Staging Multiple Draws](../concepts/transactions.md).
+
 ---
 
 ## Orientation
@@ -132,7 +134,7 @@ When using scoped accounts, every forward exchange should be explicitly tagged t
 
 ## Ledger Verification
 
-`ledger.verify()` checks that for every position, the sum of all canonical balances across `netAssets` and `equity` equals zero (exactly, in `bigint`). Open exchange positions are handled automatically because `ExchangeAccount` is part of the equity tree — no special adjustment is needed.
+`ledger.verify()` checks that for every position, the sum of all canonical balances across `netAssets` and `equity` equals zero (exactly, in `bigint`). It additionally walks every `Account` lot store (via `AccountFolder.getAccounts()`) and rejects the ledger if any `UTXO`/`UTXI` has been over-consumed (`calculateAvailable() < 0`). Open exchange positions are handled automatically because `ExchangeAccount` is part of the equity tree — no special adjustment is needed.
 
 ---
 

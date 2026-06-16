@@ -19,7 +19,9 @@ test("generated lots only affect balances once their transaction is committed", 
 
     // Committing it inside a balanced transaction makes it count.
     const equityInputs = f.openingBalance.generateInputs(f.cad, 750, f.ledger.transactions);
-    f.ledger.newTransaction(equityInputs, receipt);
+    const event = f.ledger.beginEvent();
+    event.newTransaction({ inputs: equityInputs, outputs: receipt });
+    event.register();
 
     assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 1750, "committed receipt now counts");
     assert.ok(f.ledger.verify().ok, "ledger still balances after committing the receipt");

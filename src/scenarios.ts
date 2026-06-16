@@ -1,13 +1,13 @@
 import { BookValueEngine } from "./equity-policy/book-value/engine.js";
-import { ExchangeResolution, ExchangeTransactions } from "./equity-policy/exchange.js";
-import { ExpenseResolution, type ExpenseTransactions } from "./equity-policy/expense.js";
+import { ExchangeResolution } from "./equity-policy/exchange.js";
+import { ExpenseResolution } from "./equity-policy/expense.js";
 import type { Account } from "./ledger-kernel/accounts/account.js";
 import type { ExchangeAccount, ResidualAccount } from "./ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
+import { TransactionGroup } from "./ledger-kernel/transactions.js";
 import type { Position } from "./ledger-kernel/positions.js";
-import type { Transaction } from "./ledger-kernel/transactions.js";
 import type { UTXI } from "./ledger-kernel/transactions/inputs.js";
 import type { UTXO } from "./ledger-kernel/transactions/outputs.js";
 
@@ -23,15 +23,15 @@ export interface LedgerView {
     positions: Position[];
 }
 
-export namespace ScenarioExpensesCase1 {
+export namespace ScenarioLedger {
     interface Positions {
-        cad: Position;
-        usd: Position;
+        a: Position;
+        b: Position;
     }
 
     export const positions: Positions = {
-        cad: { name: "Canadian Dollars", decimals: 2 },
-        usd: { name: "United States Dollars", decimals: 2 }
+        a: { name: "Position A (Currency)", decimals: 2 },
+        b: { name: "Position B (Currency)", decimals: 2 }
     }
 
     interface Accounts {
@@ -47,7 +47,7 @@ export namespace ScenarioExpensesCase1 {
 
         netIncome: AccountFolder;
         expenses: AccountFolder;
-        groceryExpense: Account;
+        exchangeExpense: Account;
     }
 
     function generateAccounts(): Accounts {
@@ -63,8 +63,8 @@ export namespace ScenarioExpensesCase1 {
 
         const netIncome = equity.addFolder("Net Income", Orientation.Positive);
         const expenses = netIncome.addFolder("Expenses", Orientation.Negative);
-        const groceryExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-        
+        const exchangeExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+
         return {
             netAssets,
             equity,
@@ -75,7 +75,7 @@ export namespace ScenarioExpensesCase1 {
             netTransfers,
             netIncome,
             expenses,
-            groceryExpense,
+            exchangeExpense,
         };
     }
 
@@ -84,51 +84,54 @@ export namespace ScenarioExpensesCase1 {
     export const ledger: Ledger = new Ledger(accounts.netAssets, accounts.equity);
     export const engine = new BookValueEngine(ledger.transactions);
 
-    export const phases = {
-        phase0: (): Transaction => {
-            const inputs = accounts.openingBalance.generateInputs(positions.cad, 1000, ledger.transactions);
-            const outputs = accounts.cash.generateOutputs(positions.cad, 1000, ledger.transactions);
+    export const events = {
+        event0: (): TransactionGroup => {
+            const event = ledger.beginEvent();
 
-            return ledger.newTransaction(inputs, outputs);
+            const from = event.context.generateInputs(accounts.openingBalance, positions.a, 1000);
+            const to = event.context.generateOutputs(accounts.cash, positions.a, 1000);
+            event.newTransaction(event.context);
+
+            return event.register();
         },
-        phase1: (): {
-            resolution: ExchangeResolution,
-            transactions: ExchangeTransactions
-        } => {
-            const inputs = accounts.cash.generateInputs(positions.cad, 500, ledger.transactions);
-            const outputs = accounts.cash.generateOutputs(positions.usd, 375, ledger.transactions);
+        event1: (): TransactionGroup => {
+            const event = ledger.beginEvent();
 
-            const resolution = new ExchangeResolution(inputs, outputs, ledger.transactions, engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
-            const transactions = resolution.constructTransactions();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 500);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 250);
+            const resolution = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            event.record(resolution.constructTransactions().toGroup());
 
-            ledger.addTransaction(...transactions.flatten());
-            
-            return {
-                resolution,
-                transactions
-            };
+            return event.register();
         },
-        phase2: (): {
-            resolution: ExchangeResolution,
-            transactions: ExchangeTransactions
-        } => {
-            const inputs = accounts.cash.generateInputs(positions.usd, 375, ledger.transactions);
-            const outputs = accounts.cash.generateOutputs(positions.cad, 550, ledger.transactions);
+        event2: (): TransactionGroup => {
+            const event = ledger.beginEvent();
 
-            const resolution = new ExchangeResolution(inputs, outputs, ledger.transactions, engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
-            const transactions = resolution.constructTransactions();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.b, 250);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.a, 550);
+            const resolution = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            event.record(resolution.constructTransactions().toGroup());
 
-            ledger.addTransaction(...transactions.flatten());
+            return event.register();
+        },
+        event3: (): TransactionGroup => {
+            const event = ledger.beginEvent();
 
-            return {
-                resolution,
-                transactions
-            };
+            const expensedInputs = event.context.generateInputs(accounts.cash, positions.a, 50);
+            const expense = new ExpenseResolution(expensedInputs, event.view(), engine, accounts.exchangeExpense);
+            event.record(expense.constructTransactions().toGroup());
+
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 1000);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 500);
+            const exchange = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            event.record(exchange.constructTransactions().toGroup());
+
+            return event.register();
         }
-    };
+    }
 
     export function buildSampleLedger(): LedgerView {
-        for (const phase of Object.values(phases)) phase();
+        for (const event of Object.values(events)) event();
 
         return {
             ledger: ledger,

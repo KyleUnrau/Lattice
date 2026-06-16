@@ -1,13 +1,14 @@
-import type { BookValueEngine, ResidualPath } from "./book-value/engine.js";
+import type { BookValueEngine } from "./book-value/engine.js";
 import { assertPositionUnifiromity, type Position } from "../ledger-kernel/positions.js";
 import { sumNodeQuantityScaled, Transaction } from "../ledger-kernel/transactions.js";
+import { TransactionGroup } from "../ledger-kernel/transactions.js";
 import { Exchange, ResidualUTXI, ResidualUTXO } from "../ledger-kernel/transactions/cross-position.js";
 import { type Input } from "../ledger-kernel/transactions/inputs.js";
 import { type Output } from "../ledger-kernel/transactions/outputs.js";
 import { classifyRecaptures, executeRecaptures, unwind, type Recapture } from "./recaptures.js";
 import { ExchangeAccount, gainAccountOf, lossAccountOf, type ResidualTarget } from "../ledger-kernel/accounts/computed.js";
 import { type HopTransaction } from "./recaptures.js";
-import { collectOriginLeaves } from "./book-value/lineage.js";
+import { collectOriginLeaves, type ResidualCarryBack } from "./book-value/lineage.js";
 
 interface ResidualSettlement {
     closedOutputs: Output[];
@@ -33,11 +34,12 @@ export type ExchangeRecaptureResolution = {
      */
     residualOriginBasis: Map<Position, bigint>;
     /**
-     * Residual-derived portions of the consumed value (open residuals being spent). The caller
-     * settles each — closing the residual leg and recognizing its destination proceeds.
+     * Residual-derived slivers whose origin matches the target — the **carry-backs**. Each settles:
+     * its surface leg is closed and its deferred equity re-recognized in the target (its origin).
+     * Non-matching residual-derived value is absent (it flows through the forward exchange instead).
      */
-    residualNodes: ResidualPath[];
-    /** The destination-position proceeds attributable to {@link residualNodes}. */
+    residualCarryBacks: ResidualCarryBack[];
+    /** The target-position proceeds attributable to {@link residualCarryBacks}. */
     residualDerivedProceeds: bigint;
 };
 
@@ -45,15 +47,22 @@ export class ExchangeTransactions {
     constructor(
         public readonly from: Transaction,
         public readonly to: Transaction,
-        public readonly intermediates: Transaction[]
+        public readonly intermediates: TransactionGroup,
+        public readonly resolution: ExchangeResolution
     ) {}
 
+    /**
+     * The role-annotated {@link TransactionGroup} for this exchange. Member order matches
+     * {@link flatten} exactly, so committing the group reproduces the same history.
+     */
+    public toGroup(): TransactionGroup {
+        const members: (Transaction | TransactionGroup)[] = [this.from, this.to];
+        if (this.intermediates.members.length !== 0) members.push(this.intermediates); 
+        return new TransactionGroup(members);
+    }
+
     public flatten(): Transaction[] {
-        return [
-            this.from,
-            this.to,
-            ...this.intermediates
-        ];
+        return this.toGroup().flatten();
     }
 }
 
@@ -96,7 +105,7 @@ export class ExchangeResolution {
     public readonly exchange: Exchange | null;
     /** Gain (`ResidualUTXI`) or loss (`ResidualUTXO`) on the recovered loop, carrying origin basis. */
     public readonly createdResiduals: (ResidualUTXI | ResidualUTXO)[];
-    /** Settlements closing the residual legs of residual-derived value being consumed (surface position). */
+    /** Settlements for residual-derived value carried back to its origin (close legs + re-recognize). */
     public readonly settledResiduals: ResidualSettlement;
 
     private readonly recaptureResolution: ExchangeRecaptureResolution;
@@ -130,7 +139,7 @@ export class ExchangeResolution {
             residualTarget
         );
 
-        this.settledResiduals = this.settleResidualNodes(
+        this.settledResiduals = this.settleCarryBacks(
             this.toPosition,
             this.recaptureResolution
         );
@@ -160,14 +169,19 @@ export class ExchangeResolution {
             if (recapture.settlement.source.position === surfacePosition) surfaceSettled += recapture.settlement.quantity;
         }
 
-        // Residual-derived value among the consumed inputs is settled by the caller, not forward-exchanged.
-        const residualNodes = plan.residualNodes;
-        const residualDerivedTotal = residualNodes.reduce((sum: bigint, n: ResidualPath) => sum + n.quantity, 0n);
-        const residualDerivedProceeds = fromQuantity > 0n ? outputQuantity * residualDerivedTotal / fromQuantity : 0n;
+        // A residual is a directional suspended edge: only the slivers whose origin matches the
+        // target carry back (settle to origin). Residual-derived surface whose origin is *not* the
+        // target stays an unresolved edge — it flows through the forward exchange like any other
+        // un-looped value, carrying its lineage onward, so a residual never leaks "upward" into an
+        // unrelated target. (Carry-backs settle in the surface position; only directly-held residuals
+        // are surfaced as carry-backs, so their surface == this surface position.)
+        const residualCarryBacks = plan.residualCarryBacks;
+        const carryBackSurfaceTotal = residualCarryBacks.reduce((sum, c) => sum + c.surfaceQuantity, 0n);
+        const residualDerivedProceeds = fromQuantity > 0n ? outputQuantity * carryBackSurfaceTotal / fromQuantity : 0n;
 
-        // The forward portion is whatever surface value neither looped nor came from a residual.
+        // The forward portion is whatever surface value neither looped nor carried a residual back.
         // Deriving it from the actually-settled surface amount keeps the consuming transaction exact.
-        const forwardExchangeToQuantity = fromQuantity - surfaceSettled - residualDerivedTotal;
+        const forwardExchangeToQuantity = fromQuantity - surfaceSettled - carryBackSurfaceTotal;
         const forwardExchangeFromQuantity = forwardExchangeToQuantity > 0n && fromQuantity > 0n
             ? outputQuantity * forwardExchangeToQuantity / fromQuantity
             : 0n;
@@ -198,7 +212,7 @@ export class ExchangeResolution {
             forwardExchangeToQuantity,
             forwardExchangeFromQuantity,
             residualOriginBasis,
-            residualNodes,
+            residualCarryBacks,
             residualDerivedProceeds,
         };
     }
@@ -241,37 +255,39 @@ export class ExchangeResolution {
         return [];
     }
 
-    // Residual-derived value among the consumed inputs: close each open residual leg and mint a new
-    // gain in the destination position, re-denominating deferred equity when the residual closes the
-    // loop. The mint lands in the residual's *own* account (read off `node.residual.account`), so a
-    // residual's equity is realized in the account that deferred it rather than an arbitrary one.
-    private settleResidualNodes(
+    // Residual-derived value carried back to its origin (target == one of the residual's origins):
+    // close each matching residual leg in the surface position and re-recognize its deferred equity
+    // as a gain in the target (origin) position. The mint lands in the residual's *own* account
+    // (read off `residual.account`), so its equity is realized in the account that deferred it.
+    // Residual slivers whose origin is *not* the target are absent here — they flow forward instead.
+    private settleCarryBacks(
         toPosition: Position,
         recaptureResolution: ExchangeRecaptureResolution
     ): ResidualSettlement {
-        if (recaptureResolution.residualNodes.length === 0) return { closedOutputs: [], mintedInputs: [] };
+        const carryBacks = recaptureResolution.residualCarryBacks;
+        if (carryBacks.length === 0) return { closedOutputs: [], mintedInputs: [] };
 
         const closeOutputs: Output[] = [];
         const mintInputs: Input[] = [];
-        const totalResidual = recaptureResolution.residualNodes.reduce((sum, n) => sum + n.quantity, 0n);
+        const totalSurface = carryBacks.reduce((sum, c) => sum + c.surfaceQuantity, 0n);
         let allocated = 0n;
 
-        for (let i = 0; i < recaptureResolution.residualNodes.length; i++) {
-            const node = recaptureResolution.residualNodes[i]!;
-            closeOutputs.push(node.residual.consume(node.quantity, this.transactions));
+        for (let i = 0; i < carryBacks.length; i++) {
+            const carryBack = carryBacks[i]!;
+            closeOutputs.push(carryBack.residual.consume(carryBack.surfaceQuantity, this.transactions));
 
-            const share = i === recaptureResolution.residualNodes.length - 1
+            const share = i === carryBacks.length - 1
                 ? recaptureResolution.residualDerivedProceeds - allocated
-                : recaptureResolution.residualDerivedProceeds * node.quantity / totalResidual;
+                : recaptureResolution.residualDerivedProceeds * carryBack.surfaceQuantity / totalSurface;
             allocated += share;
             if (share > 0n)
-                mintInputs.push(node.residual.account.addResidualInput(share, toPosition, new Map([[toPosition, share]])));
+                mintInputs.push(carryBack.residual.account.addResidualInput(share, toPosition, new Map([[toPosition, share]])));
         }
 
         return { closedOutputs: closeOutputs, mintedInputs: mintInputs };
     }
 
-    /** Outputs for the consuming/surface transaction: surface-position recapture settlements, the forward from-side, and closed residual legs. */
+    /** Outputs for the consuming/surface transaction: surface-position recapture settlements, the forward from-side, and closed carry-back legs. */
     public getFromOutputs(): Output[] {
         return [
             ...this.recaptureResolution.recaptures.filter(r => r.settlement.source.position === this.fromPosition).map(r => r.settlement),
@@ -280,7 +296,7 @@ export class ExchangeResolution {
         ];
     }
 
-    /** Inputs for the receiving/target transaction: target-position recapture reclaims, forward to-side, gain residual, and settled-residual mints. */
+    /** Inputs for the receiving/target transaction: target-position recapture reclaims, forward to-side, the gain residual, and carry-back re-recognitions. */
     public getToInputs(): Input[] {
         return [
             ...this.recaptureResolution.recaptures.filter(r => r.reclaim.source.position === this.toPosition).map(r => r.reclaim),
@@ -331,15 +347,16 @@ export class ExchangeResolution {
         return classifyRecaptures(this.recaptureResolution.recaptures, this.fromPosition).hops;
     }
 
-    public constructIntermediateTransactions(): Transaction[] {
-        return this.getRecaptureHops().map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions));
+    public constructIntermediateTransactions(): TransactionGroup {
+        return new TransactionGroup(this.getRecaptureHops().map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions)));
     }
 
     public constructTransactions(additionalNodes?: {inputs: Input[], outputs: Output[]}): ExchangeTransactions {
         return new ExchangeTransactions(
             this.constructFromTransaction(additionalNodes),
             this.constructToTransaction(),
-            this.constructIntermediateTransactions()
+            this.constructIntermediateTransactions(),
+            this
         );
     }
 }

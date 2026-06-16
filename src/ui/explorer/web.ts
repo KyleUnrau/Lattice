@@ -46,7 +46,15 @@ export const PAGE = String.raw`<!DOCTYPE html>
   .acct.folder > .row .nm { font-weight: 600; }
 
   /* timeline */
-  .timeline { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .timeline { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .event { border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; background: rgba(255,255,255,.015); }
+  .event.loose { border-style: dashed; }
+  .event-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .event-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); color: var(--accent); white-space: nowrap; }
+  .event-label { font-size: 12px; color: var(--text); font-weight: 600; }
+  .event-body { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+  .event .event { background: var(--panel); }
+  .chip-role { font-size: 9px; color: var(--dim); text-transform: uppercase; letter-spacing: .4px; margin-top: 2px; }
   .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 6px 9px; cursor: pointer; min-width: 64px; }
   .chip:hover { border-color: var(--accent); }
   .chip.sel { border-color: var(--accent); background: var(--panel2); }
@@ -183,14 +191,34 @@ function renderTimeline(txs) {
   if (!center.querySelector("#timeline")) {
     center.innerHTML = renderTimelineHolder() + '<div id="txbody"><div class="empty">Select a transaction above.</div></div>';
   }
-  byId("timeline").innerHTML = txs.map(function (t) {
-    var dots = CATS.filter(function (c) { return t.categories.indexOf(c) >= 0; })
-      .map(function (c) { return '<span class="dot" style="background:var(--' + c + ')" title="' + c + '"></span>'; }).join("");
-    var cls = "chip" + (t.index === App.selectedTx ? " sel" : "") + (t.committed ? "" : " future");
-    return '<div class="' + cls + '" onclick="selectTx(' + t.index + ')">'
-      + '<div class="t">t' + t.index + '</div><div class="p">' + esc(shortPos(t.position)) + '</div>'
-      + '<div class="dots">' + dots + "</div></div>";
+  var byIndex = {};
+  txs.forEach(function (t) { byIndex[t.index] = t; });
+  var groups = (App.state && App.state.groups) || [];
+
+  var grouped = {};
+  groups.forEach(function (g) { g.txIndices.forEach(function (i) { grouped[i] = true; }); });
+
+  var html = groups.map(function (g) { return renderEvent(g, byIndex); }).join("");
+  var loose = txs.filter(function (t) { return !grouped[t.index]; });
+  if (loose.length) html += '<div class="event loose"><div class="event-body">' + loose.map(function (t) { return chipHTML(t, null); }).join("") + "</div></div>";
+  byId("timeline").innerHTML = html || '<div class="empty">No transactions.</div>';
+}
+function renderEvent(g, byIndex) {
+  var members = g.members.map(function (m) {
+    if (m.group) return renderEvent(m.group, byIndex);
+    var t = byIndex[m.txIndex];
+    return t ? chipHTML(t, null) : "";
   }).join("");
+  return '<div class="event"><div class="event-body">' + members + "</div></div>";
+}
+function chipHTML(t, role) {
+  var dots = CATS.filter(function (c) { return t.categories.indexOf(c) >= 0; })
+    .map(function (c) { return '<span class="dot" style="background:var(--' + c + ')" title="' + c + '"></span>'; }).join("");
+  var cls = "chip" + (t.index === App.selectedTx ? " sel" : "") + (t.committed ? "" : " future");
+  var roleTag = role ? '<div class="chip-role">' + esc(role) + "</div>" : "";
+  return '<div class="' + cls + '" onclick="selectTx(' + t.index + ')">'
+    + '<div class="t">t' + t.index + '</div><div class="p">' + esc(shortPos(t.position)) + "</div>"
+    + roleTag + '<div class="dots">' + dots + "</div></div>";
 }
 function renderTransaction(tx) {
   renderTimeline(App.state.transactions);

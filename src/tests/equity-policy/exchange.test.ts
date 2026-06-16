@@ -90,9 +90,8 @@ test("a partial exchange resolves only its portion; the rest is an independent t
     const res = new ExchangeResolution(exchangedInputs, toOutputs, f.ledger.transactions,
                                        f.engine, { gain: f.capitalGains, loss: f.capitalLosses }, f.cadToUsd);
 
-    f.ledger.newTransaction(exchangedInputs, res.getFromOutputs());
-    for (const hop of res.constructIntermediateTransactions()) f.ledger.newTransaction(hop.inputs, hop.outputs);
-    f.ledger.newTransaction(res.getToInputs(), res.getToOutputs());
+    const event = f.ledger.beginEvent();
+    event.record(res.constructTransactions().toGroup());
 
     // The forward exchange links ONLY the exchanged 400 CAD ↔ 300 USD.
     assert.notEqual(res.exchange, null);
@@ -100,10 +99,11 @@ test("a partial exchange resolves only its portion; the rest is an independent t
     assert.equal(res.exchange!.to.quantity, 30000n);
 
     // Withdraw the remaining 100 CAD as a fully independent transaction (its own input→output flow).
-    f.ledger.newTransaction(
-        f.cash.generateInputs(f.cad, 100, f.ledger.transactions),
-        f.drawings.generateOutputs(f.cad, 100, f.ledger.transactions),
-    );
+    event.newTransaction({
+        inputs: f.cash.generateInputs(f.cad, 100, event.view()),
+        outputs: f.drawings.generateOutputs(f.cad, 100, event.view()),
+    });
+    event.register();
 
     assert.ok(f.ledger.verify().ok, "ledger must verify after a partial exchange + independent withdrawal");
 

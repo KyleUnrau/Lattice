@@ -7,9 +7,9 @@ import { commitSwap, makeFixture, openInto } from "../utils/ledger-fixture.js";
 // expense-recognition transactions the resolution emits.
 function commitExpense(f: ReturnType<typeof makeFixture>, inputs: ReturnType<typeof f.cash.generateInputs>) {
     const resolution = new ExpenseResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
-    f.ledger.newTransaction(inputs, resolution.getFromOutputs());
-    for (const tx of resolution.constructIntermediateTransactions()) f.ledger.addTransaction(tx);
-    for (const tx of resolution.constructExpenseTransactions()) f.ledger.addTransaction(tx);
+    const event = f.ledger.beginEvent();
+    event.record(resolution.constructTransactions().toGroup());
+    event.register();
     return resolution;
 }
 

@@ -1,5 +1,6 @@
 import { type Position, formatQuantity, unscale } from "../../ledger-kernel/positions.js";
 import type { Transaction } from "../../ledger-kernel/transactions.js";
+import { TransactionGroup } from "../../ledger-kernel/transactions.js";
 import { UTXI, UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO, UTXIConsumption } from "../../ledger-kernel/transactions/outputs.js";
 import {
@@ -171,6 +172,19 @@ function accountDTO(node: AccountNode, reg: Registry, slice: Transaction[]): Dic
     return dto;
 }
 
+// --- group tree -----------------------------------------------------------------------------
+
+/** Serializes a {@link TransactionGroup} into its leaf tx indices and members (leaf tx indices or nested groups). */
+function serializeGroup(group: TransactionGroup, txIndex: Map<Transaction, number>): Dict {
+    return {
+        txIndices: group.flatten().map(tx => txIndex.get(tx) ?? null),
+        members: group.members.map((member): Dict =>
+            member instanceof TransactionGroup
+                ? { group: serializeGroup(member, txIndex) }
+                : { txIndex: txIndex.get(member) ?? null }),
+    };
+}
+
 // --- public builders ------------------------------------------------------------------------
 
 /** Top-level snapshot: positions, the account tree (balances as-of the cursor), and the transaction timeline. */
@@ -195,6 +209,8 @@ export function buildState(view: LedgerView, reg: Registry, upToRaw: number | un
 
     const verification = view.ledger.verify();
 
+    const txIndex = new Map<Transaction, number>(transactions.map((tx, index) => [tx, index]));
+
     return {
         upTo,
         total: transactions.length,
@@ -206,6 +222,7 @@ export function buildState(view: LedgerView, reg: Registry, upToRaw: number | un
             accountDTO(view.ledger.equity, reg, slice),
         ],
         transactions: timeline,
+        groups: view.ledger.groups.map(group => serializeGroup(group, txIndex)),
     };
 }
 

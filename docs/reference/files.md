@@ -10,13 +10,15 @@ src/
 │
 ├── ledger-kernel/                             [kernel] Core double-entry infrastructure
 │   ├── positions.ts                           Position interface, scale/unscale/formatQuantity
-│   ├── transactions.ts                        Transaction class, construction and validation; sumNodeQuantityScaled
-│   ├── ledger.ts                              Ledger container, newTransaction, addTransaction, verify, Orientation enum
+│   ├── transactions.ts                        Transaction class, construction and aggregate over-consumption validation; TransactionLike interface; sumNodeQuantityScaled
+│   ├── ledger.ts                              Ledger container, newTransaction, record/beginEvent (group overlay), beginGeneration, verify (zero-sum + lot-availability backstop), Orientation enum, EventBuilder
+│   ├── generation-context.ts                  GenerationContext — staging session for multiple draws before commit (Ledger.beginGeneration)
+│   ├── transaction-group.ts                   TransactionGroup — recursive, non-authoritative semantic overlay grouping related transactions into business events
 │   │
 │   ├── accounts/                              [kernel] Account system
 │   │   ├── node.ts                            AccountNode interface (common to Account and AccountFolder)
 │   │   ├── account.ts                         Account leaf class; generateInputs/generateOutputs
-│   │   ├── folder.ts                          AccountFolder tree node; addAccount/addFolder/addResidualAccount/addExchangeAccount
+│   │   ├── folder.ts                          AccountFolder tree node; addAccount/addFolder/addResidualAccount/addExchangeAccount; getAccounts
 │   │   ├── position-lot-store.ts              PositionLotStore per-position lot store; generateInputs/generateOutputs
 │   │   ├── computed.ts                        ComputedAccount, ResidualAccount, ExchangeAccount; ResidualTarget, gainAccountOf, lossAccountOf
 │   │   └── summary.ts                         AccountSummary, FolderSummary display types
@@ -52,7 +54,9 @@ src/
     ├── utils/
     │   └── ledger-fixture.ts                  Shared account setup helpers for tests
     ├── ledger-kernel/
-    │   └── uncommitted-lots.test.ts           Kernel lot-availability invariant tests
+    │   ├── uncommitted-lots.test.ts           Kernel lot-availability invariant tests
+    │   ├── staged-generation.test.ts          GenerationContext staging + over-consumption guard tests
+    │   └── transaction-groups.test.ts         TransactionGroup overlay: record/beginEvent, member order, identity, verify
     └── equity-policy/
         ├── exchange.test.ts                   Exchange/ExchangeResolution integration tests
         ├── exchange-invariants.test.ts        Exchange invariant tests

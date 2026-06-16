@@ -1,5 +1,5 @@
 import type { Position } from "../positions.js";
-import type { Transaction } from "../transactions.js";
+import type { TransactionLike } from "../transactions.js";
 import { UTXOConsumption, type UTXI } from "./inputs.js";
 
 export type Output = UTXO | UTXIConsumption;
@@ -22,7 +22,7 @@ export class UTXO {
     }
 
     /** Returns all {@link UTXOConsumption}s referencing this UTXO across the transaction history. */
-    public getConsumptions(transactions: Transaction[]): UTXOConsumption[] {
+    public getConsumptions(transactions: readonly TransactionLike[]): UTXOConsumption[] {
         const consumptions: UTXOConsumption[] = [];
 
         for (const transaction of transactions) {
@@ -35,7 +35,7 @@ export class UTXO {
     }
 
     /** Remaining quantity not yet consumed by any {@link UTXOConsumption} in the history. */
-    public calculateAvailable(transactions: Transaction[]): bigint {
+    public calculateAvailable(transactions: readonly TransactionLike[]): bigint {
         let available: bigint = this.quantity;
         for (const consumption of this.getConsumptions(transactions)) available -= consumption.quantity;
         return available;
@@ -46,7 +46,7 @@ export class UTXO {
      * `transactions`. A generated-but-not-yet-committed lot returns `false`, so balances exclude it
      * until the transaction that introduces it is appended to the ledger.
      */
-    public isCommitted(transactions: Transaction[]): boolean {
+    public isCommitted(transactions: readonly TransactionLike[]): boolean {
         return transactions.some(transaction => transaction.outputs.includes(this));
     }
 
@@ -54,7 +54,7 @@ export class UTXO {
      * Creates a {@link UTXOConsumption} for `quantity` units, asserting the available balance
      * is sufficient. The returned object must be placed in a transaction's inputs.
      */
-    public consume(quantity: bigint, transactions: Transaction[]): UTXOConsumption {
+    public consume(quantity: bigint, transactions: readonly TransactionLike[]): UTXOConsumption {
         if (quantity < 0n) throw new Error(`Attempted to consume a negative number from a UTXO`);
 
         const available: bigint = this.calculateAvailable(transactions);

@@ -1,6 +1,6 @@
 import { UTXO } from "../transactions/outputs.js";
 import { UTXI } from "../transactions/inputs.js";
-import type { Transaction } from "../transactions.js";
+import type { TransactionLike } from "../transactions.js";
 
 /**
  * Selects which lots to consume and in what amounts when `delta` units are requested.
@@ -8,4 +8,4 @@ import type { Transaction } from "../transactions.js";
  * `transactions` is required because lot availability is computed dynamically from history,
  * not stored on the lot itself.
  */
-export type DisposalMethod<T extends UTXO | UTXI> = (components: T[], delta: bigint, transactions: Transaction[]) => Map<T, bigint>;
+export type DisposalMethod<T extends UTXO | UTXI> = (components: T[], delta: bigint, transactions: readonly TransactionLike[]) => Map<T, bigint>;

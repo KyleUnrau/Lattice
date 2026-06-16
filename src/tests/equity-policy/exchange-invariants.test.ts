@@ -220,6 +220,42 @@ test("INV5: residual-derived CAD settles back against its inherited BTC basis in
 });
 
 // ---------------------------------------------------------------------------
+// 5b. Residual-derived value moved toward an UNRELATED target must not leak upward.
+// ---------------------------------------------------------------------------
+
+test("INV5b: residual-derived value exchanged into a non-origin target flows forward — the deferred gain stays at its origin, never re-anchored to the destination", () => {
+    const f = makeFixture();
+    openInto(f, f.wallet, f.btc, 0.02);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad); // CAD now BTC-derived
+    commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 375, f.cadToUsd);
+    commitSwap(f, f.cash, f.usd, 375, f.cash, f.cad, 550, f.usdToCad); // 50 CAD residual gain, origin BTC
+
+    // The deferred gain sits in CAD, inheriting BTC origin basis.
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "50 CAD gain deferred");
+
+    // Now move the residual-derived CAD into USD — an UNRELATED target (origin is BTC, not USD).
+    // Cash holds 1050 CAD (BTC-derived + residual-derived); convert it all to USD.
+    const moved = commitSwap(f, f.cash, f.cad, 1050, f.cash, f.usd, 800, f.cadToUsd);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after moving residual-derived value to a non-origin target");
+
+    // KEY INVARIANT (the event3 bug): the residual is NOT carried back / re-anchored. No leg is
+    // closed, and a plain forward exchange opens for the whole draw — the residual edge stays open.
+    assert.equal(moved.resolution.residualCloseOutputs.length, 0, "no residual leg closed — this is not a carry-back");
+    assert.notEqual(moved.resolution.exchange, null, "a forward exchange opens for the residual-derived value");
+
+    // The deferred gain must NOT leak upward into USD; it remains exactly where it was, in CAD,
+    // until value actually returns toward its true (BTC) origin.
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "no gain leaks into the USD destination");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "the deferred CAD gain is untouched");
+
+    // The USD proceeds' basis traces back through the forward exchange to the true origin (BTC),
+    // never re-anchored to CAD or USD by a spurious re-mint.
+    const usdLot = lotsOf(f, f.cash, f.usd).find(u => u.calculateAvailable(f.ledger.transactions) > 0n)!;
+    assert.deepEqual([...originOf(f, usdLot).keys()], [f.btc], "USD basis still traces to the BTC origin");
+});
+
+// ---------------------------------------------------------------------------
 // 6. Mixed-origin balances remain distinguishable (deterministic FIFO selection).
 // ---------------------------------------------------------------------------
 

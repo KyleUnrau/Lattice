@@ -89,6 +89,37 @@ ledger.newTransaction(inputs, outputs);
 
 ---
 
+## Staging Multiple Draws Before Commit
+
+Because availability is computed by scanning a transaction list (above), generating **two inputs (or two outputs) from the same account + position straight off `ledger.transactions` double-counts the lots** — the first call's consumptions aren't in the committed history yet, so the second call sees the lots as fully available again.
+
+When more than one draw happens before the transaction(s) are committed, use a **generation session** instead:
+
+```ts
+const generation = ledger.beginGeneration();
+const exchangedInputs  = generation.generateInputs(cash, posA, 1000);
+const exchangedOutputs = generation.generateOutputs(cash, posB, 500);
+const expensedInputs   = generation.generateInputs(cash, posA, 50);   // sees the first 1000 as spent
+```
+
+`GenerationContext` (returned by `Ledger.beginGeneration()`) feeds each call the committed history **plus a provisional record of everything staged so far**, so availability subtracts the earlier staged consumptions. The session never commits — you still hand the returned inputs/outputs to `Ledger.newTransaction` or a resolution. The provisional record is typed `TransactionLike` (`{ inputs, outputs }`), the structural shape the availability scan needs.
+
+The raw `account.generate*` methods remain for single-shot generation.
+
+---
+
+## Over-Consumption Guards
+
+A lot can never be consumed beyond its availability. Three layers enforce this:
+
+1. **During generation** — `UTXO.consume()` / `UTXI.consume()` reject a single draw exceeding availability.
+2. **At construction** — the `Transaction` constructor **aggregates consumptions by source**: two consumptions of the *same* lot can each fit individually yet over-consume together (double-spend within one transaction), so their sum is checked against availability and throws on excess.
+3. **At verification** — `ledger.verify()` walks every lot store and rejects the ledger if any lot's availability has gone negative, catching over-consumption spread across a batch of separately-constructed transactions.
+
+Under-consumption (leaving a lot partly unspent) is *not* an error and is not guarded — the generation session is the recommended way to avoid it.
+
+---
+
 ## Exchange Subtypes
 
 For cross-position movement, the system extends these primitives with exchange-tagged variants. See [Exchanges](exchanges.md) for the full picture.
@@ -106,4 +137,5 @@ For cross-position movement, the system extends these primitives with exchange-t
 
 - [Positions & Quantities](positions.md) — How quantities are scaled and stored as bigint
 - [Exchanges](exchanges.md) — The Exchange object, recapture, and residual lots
+- [Transaction Groups](transaction-groups.md) — The semantic overlay linking related transactions into business events
 - [Account System](../architecture/accounts.md) — How accounts generate inputs and outputs

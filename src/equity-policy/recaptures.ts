@@ -3,7 +3,8 @@ import type { Transaction } from "../ledger-kernel/transactions.js";
 import type { Exchange } from "../ledger-kernel/transactions/cross-position.js";
 import type { Input, UTXOConsumption } from "../ledger-kernel/transactions/inputs.js";
 import type { Output, UTXIConsumption } from "../ledger-kernel/transactions/outputs.js";
-import { collectChainEdges, groupRecapturesByExchange, collectResidualNodes } from "./book-value/lineage.js";
+import { collectChainEdges, groupRecapturesByExchange, collectResidualNodes, collectCarryBacks } from "./book-value/lineage.js";
+import type { ResidualCarryBack } from "./book-value/lineage.js";
 import type { BasisPath, ResidualPath } from "./book-value/engine.js";
 
 /** A single-position settlement transaction emitted as part of a multi-hop unwind. */
@@ -23,6 +24,16 @@ export interface UnwindPlan {
     recaptures: Map<Exchange, { toQuantity: bigint; fromQuantity: bigint; }>;
     recovered: Map<Position, bigint>;
     loopedSurfaceQuantity: bigint;
+    /**
+     * Loop mode only: residual slivers whose origin matches the target — each closes its surface
+     * leg and recovers its origin basis. Slivers that do *not* match the target are absent (they
+     * remain unresolved residual edges and flow into the forward exchange). Empty in full mode.
+     */
+    residualCarryBacks: ResidualCarryBack[];
+    /**
+     * Full mode only (`stopAt === null`): every `ResidualPath` in the consumed lineage, settled to
+     * origin by {@link ExpenseResolution}. Empty in loop mode (use {@link residualCarryBacks}).
+     */
     residualNodes: ResidualPath[];
 }
 
@@ -39,7 +50,10 @@ export function unwind(basis: BasisPath[], stopAt: Position | null): UnwindPlan 
         recaptures: groupRecapturesByExchange(edges),
         recovered,
         loopedSurfaceQuantity: loopedQuantity,
-        residualNodes: collectResidualNodes(basis),
+        // Loop mode carries directly-held residuals back to the target; full mode settles every
+        // residual to origin separately (via residualNodes).
+        residualCarryBacks: stopAt === null ? [] : collectCarryBacks(basis, stopAt),
+        residualNodes: stopAt === null ? collectResidualNodes(basis) : [],
     };
 }
 

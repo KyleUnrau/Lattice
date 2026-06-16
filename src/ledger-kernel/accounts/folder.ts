@@ -69,6 +69,16 @@ export class AccountFolder implements AccountNode {
         return folder;
     }
 
+    /** Recursively collects every {@link Account} in this folder's subtree (excludes residual/exchange nodes). */
+    public getAccounts(): Account[] {
+        const accounts: Account[] = [];
+        for (const child of this.children) {
+            if (child instanceof Account) accounts.push(child);
+            else if (child instanceof AccountFolder) accounts.push(...child.getAccounts());
+        }
+        return accounts;
+    }
+
     public getEffectiveOrientation(): Orientation {
         if (this.parent === null) return this.localOrientation;
         return this.parent.getEffectiveOrientation() * this.localOrientation;

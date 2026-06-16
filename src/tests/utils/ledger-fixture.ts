@@ -76,10 +76,12 @@ export function makeFixture(): Fixture {
 
 /** Commits an opening-balance credit of `value` units of `position` into `cash`. */
 export function openInto(f: Fixture, account: Account, position: Position, value: number): void {
-    f.ledger.newTransaction(
-        f.openingBalance.generateInputs(position, value, f.ledger.transactions),
-        account.generateOutputs(position, value, f.ledger.transactions),
-    );
+    const event = f.ledger.beginEvent();
+    event.newTransaction({
+        inputs: f.openingBalance.generateInputs(position, value, f.ledger.transactions),
+        outputs: account.generateOutputs(position, value, f.ledger.transactions),
+    });
+    event.register();
 }
 
 export interface SwapResult {
@@ -106,10 +108,9 @@ export function commitSwap(
         f.engine, { gain: f.capitalGains, loss: f.capitalLosses }, exchangeAccount
     );
 
-    f.ledger.newTransaction(fromInputs, resolution.getFromOutputs());
-    const intermediates = resolution.getRecaptureHops();
-    for (const hop of intermediates) f.ledger.newTransaction(hop.inputs, hop.outputs);
-    f.ledger.newTransaction(resolution.getToInputs(), resolution.getToOutputs());
+    const event = f.ledger.beginEvent();
+    event.record(resolution.constructTransactions().toGroup());
+    event.register();
 
-    return { resolution, intermediates };
+    return { resolution, intermediates: resolution.getRecaptureHops() };
 }
