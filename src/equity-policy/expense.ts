@@ -8,7 +8,7 @@ import type { Input } from "../ledger-kernel/transactions/inputs.js";
 import type { Output } from "../ledger-kernel/transactions/outputs.js";
 import { unwind, executeRecaptures, classifyRecaptures } from "./recaptures.js";
 import type { HopTransaction, Recapture, RecaptureClassification, UnwindPlan } from "./recaptures.js";
-import type { Account } from "../ledger-kernel/accounts/account.js";
+import type { TerminalAccount } from "../ledger-kernel/accounts/computed.js";
 
 /** A residual settled by being expensed: its inherited origin-position basis is re-recognized as a capital gain. */
 export type ExpenseResidualRecognition = {
@@ -96,7 +96,7 @@ export class ExpenseResolution {
         public readonly inputs: Input[],
         private readonly transactions: Transaction[],
         engine: BookValueEngine,
-        private readonly account: Account
+        private readonly account: TerminalAccount
     ) {
         this.fromPosition = assertPositionUnifiromity({ inputs });
         const totalConsumed = sumNodeQuantityScaled(inputs);
@@ -171,7 +171,7 @@ export class ExpenseResolution {
     // Surface-position expense debits for the no-lineage origin amounts (the consuming transaction's
     // own expense recognition).
     private generateDirectExpenseOutputs(): Output[] {
-        return this.originAmounts.flatMap(o => this.account.generateOutputs(o.position, o.quantity, this.transactions));
+        return this.originAmounts.map(o => this.account.recognize(o.quantity, o.position));
     }
 
     // One recognition entry per terminal-origin reclaim (reclaimed origin amount → expense output)
@@ -180,11 +180,11 @@ export class ExpenseResolution {
         return [
             ...this.recaptureGroups.map(group => ({
                 inputs: group.recaptures.map(r => r.reclaim),
-                outputs: this.account.generateOutputs(group.position, group.totalQuantity, this.transactions),
+                outputs: [this.account.recognize(group.totalQuantity, group.position)],
             })),
             ...this.residualRecognitions.map(r => ({
                 inputs: [r.gainLot] as Input[],
-                outputs: this.account.generateOutputs(r.position, r.quantity, this.transactions),
+                outputs: [this.account.recognize(r.quantity, r.position)],
             })),
         ];
     }

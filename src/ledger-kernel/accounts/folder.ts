@@ -1,4 +1,4 @@
-import { ResidualAccount, ExchangeAccount } from "./computed.js";
+import { ResidualAccount, ExchangeAccount, TerminalAccount } from "./computed.js";
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import type { Orientation } from "../ledger.js";
 import { type Position, unscale } from "../positions.js";
@@ -59,6 +59,12 @@ export class AccountFolder implements AccountNode {
 
     public addExchangeAccount(name: string, localOrientation: Orientation): ExchangeAccount {
         const child = new ExchangeAccount(name, localOrientation);
+        this.addChild(child);
+        return child;
+    }
+
+    public addTerminalAccount(name: string, localOrientation: Orientation): TerminalAccount {
+        const child = new TerminalAccount(name, localOrientation);
         this.addChild(child);
         return child;
     }

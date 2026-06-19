@@ -18,15 +18,16 @@ src/
 │   ├── accounts/                              [kernel] Account system
 │   │   ├── node.ts                            AccountNode interface (common to Account and AccountFolder)
 │   │   ├── account.ts                         Account leaf class; generateInputs/generateOutputs
-│   │   ├── folder.ts                          AccountFolder tree node; addAccount/addFolder/addResidualAccount/addExchangeAccount; getAccounts
+│   │   ├── folder.ts                          AccountFolder tree node; addAccount/addFolder/addResidualAccount/addExchangeAccount/addTerminalAccount; getAccounts
 │   │   ├── position-lot-store.ts              PositionLotStore per-position lot store; generateInputs/generateOutputs
-│   │   ├── computed.ts                        ComputedAccount, ResidualAccount, ExchangeAccount; ResidualTarget, gainAccountOf, lossAccountOf
+│   │   ├── computed.ts                        ComputedAccount, ResidualAccount (gains), ExchangeAccount, TerminalAccount (terminal sink); ResidualTarget, gainAccountOf, lossAccountOf
 │   │   └── summary.ts                         AccountSummary, FolderSummary display types
 │   │
 │   ├── transactions/                          [kernel] Lot and exchange primitives
 │   │   ├── inputs.ts                          UTXI, UTXOConsumption, Input union type
 │   │   ├── outputs.ts                         UTXO, UTXIConsumption, Output union type
-│   │   └── cross-position.ts                  Exchange, ExchangedUTXO/UTXI, ResidualUTXO/UTXI, ExchangeAccountMarker
+│   │   ├── cross-position.ts                  Exchange, ExchangedUTXO/UTXI, ResidualUTXI (gain edge), ExchangeAccountMarker
+│   │   └── terminal.ts                         TerminalUTXO — non-consumable terminal settlement record (expenses, realized losses)
 │   │
 │   └── disposal-methods/                      [kernel] Lot selection strategies
 │       ├── disposals.ts                       DisposalMethod<T> type definition
@@ -35,8 +36,8 @@ src/
 ├── equity-policy/                             [policy] Business logic layered on the kernel
 │   ├── book-value/
 │   │   ├── engine.ts                          BookValueEngine — backward basis traversal; BasisPath, OriginPath, ExchangePath, ResidualPath types
-│   │   └── lineage.ts                         collectOriginLeaves() (public); collectChainEdges(),
-│   │                                          groupRecapturesByExchange(), collectResidualNodes() (internal)
+│   │   └── lineage.ts                         collectOriginLeaves(), collectCarryBacks() (public); collectChainEdges(),
+│   │                                          groupRecapturesByExchange(), collectResidualNodes() (internal); ResidualCarryBack type
 │   ├── exchange.ts                            ExchangeResolution — assembles kernel lines for a cross-position exchange
 │   ├── expense.ts                             ExpenseResolution — full-unwind expense recording
 │   └── recaptures.ts                          unwind(), executeRecaptures(), classifyRecaptures(); UnwindPlan, Recapture, HopTransaction

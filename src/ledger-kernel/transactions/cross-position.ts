@@ -76,28 +76,6 @@ export class ExchangedUTXI extends UTXI {
 }
 
 /**
- * A loss (shortfall) relative to an exchange's locked rate, recognized in the surface position.
- * Placed in a transaction's outputs. The owning {@link ResidualAccount} that minted this lot is
- * referenced by {@link account}, so a later settlement can re-recognize the deferred equity within
- * the same account it originated in rather than an arbitrary one.
- *
- * `originBasis` records the origin-position composition (e.g. `{BTC: 0.0005}`) that this residual's
- * surface amount traces back to — the deferred equity it carries until settlement. The basis engine
- * surfaces this directly as a {@link ResidualPath} so consumers can settle the residual into its
- * origin positions.
- */
-export class ResidualUTXO extends UTXO {
-    public type = "residual-utxo";
-
-    constructor(
-        quantity: bigint,
-        position: Position,
-        public readonly originBasis: Map<Position, bigint>,
-        public readonly account: ResidualAccount
-    ) { super(quantity, position); }
-}
-
-/**
  * A gain (surplus) relative to an exchange's locked rate, recognized in the surface position.
  * Placed in a transaction's inputs. The owning {@link ResidualAccount} that minted this lot is
  * referenced by {@link account}, so a later settlement can re-recognize the deferred equity within

@@ -7,11 +7,11 @@ import {
     ExchangedUTXI,
     ExchangedUTXO,
     ResidualUTXI,
-    ResidualUTXO,
 } from "../../ledger-kernel/transactions/cross-position.js";
+import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
 import { Account } from "../../ledger-kernel/accounts/account.js";
 import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";
-import { ResidualAccount, ExchangeAccount } from "../../ledger-kernel/accounts/computed.js";
+import { ResidualAccount, ExchangeAccount, TerminalAccount } from "../../ledger-kernel/accounts/computed.js";
 import type { AccountNode } from "../../ledger-kernel/accounts/node.js";
 import { BookValueEngine, type BasisPath } from "../../equity-policy/book-value/engine.js";
 import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
@@ -79,7 +79,7 @@ function classify(obj: LotLike, side: "input" | "output"): Classification {
             ? { category: "recapture", role: "Recapture · settle" }
             : { category: "settle", role: "Settle obligation" };
     if (obj instanceof ExchangedUTXO) return { category: "exchange", role: "Exchange · given" };
-    if (obj instanceof ResidualUTXO) return { category: "residual", role: "Loss recognized" };
+    if (obj instanceof TerminalUTXO) return { category: "terminal", role: "Terminal settlement" };
     return { category: "rest", role: "New lot (at rest)" };
 }
 
@@ -137,7 +137,7 @@ function lineDTO(obj: LotLike, side: "input" | "output", reg: Registry, slice: T
         dto.exchangeId = reg.exchangeIdOf(obj.exchange) ?? null;
         dto.counterpartLotId = reg.idOf(obj instanceof ExchangedUTXO ? obj.exchange.to : obj.exchange.from) ?? null;
     }
-    if (obj instanceof ResidualUTXO || obj instanceof ResidualUTXI)
+    if (obj instanceof ResidualUTXI)
         dto.originBasis = originBasisDTO(obj.originBasis);
     if (obj instanceof UTXO || obj instanceof UTXI)
         dto.availableFmt = formatQuantity(obj.calculateAvailable(slice), position);
@@ -303,7 +303,7 @@ export function buildLot(view: LedgerView, reg: Registry, id: string, upToRaw: n
     }
 
     if (lot instanceof ExchangedUTXO || lot instanceof ExchangedUTXI) dto.exchangeId = reg.exchangeIdOf(lot.exchange) ?? null;
-    if (lot instanceof ResidualUTXO || lot instanceof ResidualUTXI) dto.originBasis = originBasisDTO(lot.originBasis);
+    if (lot instanceof ResidualUTXI) dto.originBasis = originBasisDTO(lot.originBasis);
 
     // Basis trace: trace UTXO-side lots directly; for the UTXI side, trace the exchange's from-side.
     const engine = new BookValueEngine(transactions);

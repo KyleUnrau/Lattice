@@ -9,8 +9,8 @@ import {
     ExchangedUTXI,
     ExchangedUTXO,
     ResidualUTXI,
-    ResidualUTXO,
 } from "../../ledger-kernel/transactions/cross-position.js";
+import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
 import type { LedgerView } from "../../scenarios.js";
 
 /** Any value-bearing lot or consumption record that can appear in a transaction's inputs/outputs. */
@@ -70,7 +70,7 @@ export class Registry {
         this.lotId.set(obj, id);
         this.lotById.set(id, obj);
 
-        if (obj instanceof ResidualUTXO || obj instanceof ResidualUTXI) this.owner.set(obj, obj.account as unknown as AccountNode);
+        if (obj instanceof ResidualUTXI || obj instanceof TerminalUTXO) this.owner.set(obj, obj.account as unknown as AccountNode);
         if (obj instanceof ExchangedUTXO || obj instanceof ExchangedUTXI) {
             const account = obj.exchange.account as AccountNode | undefined;
             if (account) this.owner.set(obj, account);

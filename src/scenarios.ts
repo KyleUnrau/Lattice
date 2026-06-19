@@ -2,7 +2,7 @@ import { BookValueEngine } from "./equity-policy/book-value/engine.js";
 import { ExchangeResolution } from "./equity-policy/exchange.js";
 import { ExpenseResolution } from "./equity-policy/expense.js";
 import type { Account } from "./ledger-kernel/accounts/account.js";
-import type { ExchangeAccount, ResidualAccount } from "./ledger-kernel/accounts/computed.js";
+import type { ExchangeAccount, ResidualAccount, TerminalAccount } from "./ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
@@ -42,12 +42,13 @@ export namespace ScenarioLedger {
         cash: Account;
 
         openingBalance: Account;
-        capitalGainsOrLosses: ResidualAccount;
+        capitalGains: ResidualAccount;
+        capitalLosses: TerminalAccount;
         netTransfers: ExchangeAccount;
 
         netIncome: AccountFolder;
         expenses: AccountFolder;
-        exchangeExpense: Account;
+        exchangeExpense: TerminalAccount;
     }
 
     function generateAccounts(): Accounts {
@@ -58,12 +59,13 @@ export namespace ScenarioLedger {
         const cash = assets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 
         const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-        const capitalGainsOrLosses = equity.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
+        const capitalGains = equity.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
         const netTransfers = equity.addExchangeAccount("Net Transfers", Orientation.Positive);
 
         const netIncome = equity.addFolder("Net Income", Orientation.Positive);
         const expenses = netIncome.addFolder("Expenses", Orientation.Negative);
-        const exchangeExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+        const exchangeExpense = expenses.addTerminalAccount("Exchange Expense", Orientation.Positive);
+        const capitalLosses = expenses.addTerminalAccount("Capital Loss", Orientation.Positive);
 
         return {
             netAssets,
@@ -71,7 +73,8 @@ export namespace ScenarioLedger {
             assets,
             cash,
             openingBalance,
-            capitalGainsOrLosses,
+            capitalGains,
+            capitalLosses,
             netTransfers,
             netIncome,
             expenses,
@@ -99,7 +102,7 @@ export namespace ScenarioLedger {
 
             const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 500);
             const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 250);
-            const resolution = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            const resolution = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, { gain: accounts.capitalGains, loss: accounts.capitalLosses }, accounts.netTransfers);
             event.record(resolution.constructTransactions().toGroup());
 
             return event.register();
@@ -109,12 +112,17 @@ export namespace ScenarioLedger {
 
             const fromInputs = event.context.generateInputs(accounts.cash, positions.b, 250);
             const toOutputs = event.context.generateOutputs(accounts.cash, positions.a, 550);
-            const resolution = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            const resolution = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, { gain: accounts.capitalGains, loss: accounts.capitalLosses }, accounts.netTransfers);
             event.record(resolution.constructTransactions().toGroup());
 
             return event.register();
         },
         event3: (): TransactionGroup => {
+            // Composite event: expense 50 A, then exchange 1000 A → 500 B. The 1000 A is partly
+            // derived from the event2 residual (a Position-A gain whose b asis traces to A). Because
+            // the exchange target (B) is NOT one of that residual's origins, the residual is carried
+            // *forward* into the new A→B exchange (its lineage preserved behind the edge) rather than
+            // re-anchored onto the B side — the deferred gain stays at its origin (A). See INV5b.
             const event = ledger.beginEvent();
 
             const expensedInputs = event.context.generateInputs(accounts.cash, positions.a, 50);
@@ -123,7 +131,7 @@ export namespace ScenarioLedger {
 
             const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 1000);
             const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 500);
-            const exchange = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, accounts.capitalGainsOrLosses, accounts.netTransfers);
+            const exchange = new ExchangeResolution(fromInputs, toOutputs, event.view(), engine, { gain: accounts.capitalGains, loss: accounts.capitalLosses }, accounts.netTransfers);
             event.record(exchange.constructTransactions().toGroup());
 
             return event.register();

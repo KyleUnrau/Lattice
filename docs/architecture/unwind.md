@@ -36,13 +36,15 @@ interface UnwindPlan {
     recaptures: Map<Exchange, { toQuantity: bigint; fromQuantity: bigint }>;
     recovered: Map<Position, bigint>;          // basis amounts recovered at recovery points
     loopedSurfaceQuantity: bigint;             // surface quantity that looped (proration weight)
-    residualNodes: ResidualPath[];             // residual-derived value among the consumed inputs
+    residualCarryBacks: ResidualCarryBack[];   // loop mode: residuals whose origin == target
+    residualNodes: ResidualPath[];             // full mode: every residual, settled to origin
 }
 ```
 
 - **`recaptures`** — one entry per distinct `Exchange` instance, with summed to-side and from-side quantities across all branches. Even when the same exchange appears in multiple basis paths (because the consumed UTXOs each carry a fraction of it), it is recaptured exactly once.
 - **`recovered`** — the terminal-position basis recovered from closed loops: for loop mode this is the from-side basis of the loop ancestors; for full mode this is the origin-position leaves.
-- **`residualNodes`** — `ResidualPath` nodes among the consumed lineage; settled separately by `ExchangeResolution` (the residual lot is consumed and a new gain minted in the target position).
+- **`residualCarryBacks`** — *loop mode only*. A residual is a **directional suspended edge** from its origin position(s) to its surface. Only directly-held residuals whose origin basis includes `stopAt` are surfaced here: moving such value back toward its origin carries it back (settle the surface leg, re-recognize at origin). Residual slivers whose origin is **not** the target are deliberately absent — they flow through the forward exchange, so a residual never leaks "upward" into an unrelated position.
+- **`residualNodes`** — *full mode only* (`stopAt === null`). Every `ResidualPath` in the consumed lineage; `ExpenseResolution` settles each to its origin.
 
 ---
 
@@ -59,11 +61,28 @@ These transactions net to zero for every intermediate position, ensuring `ledger
 
 ## Residual-Derived Value
 
-When consumed inputs include value that originated from a prior `ResidualUTXI` (a recognized gain that was subsequently deposited into an account and is now being spent), the unwind algorithm surfaces those as `ResidualPath` nodes in `UnwindPlan.residualNodes`.
+A residual is a **directional suspended edge** from its origin position(s) to its current surface
+position. When consumed inputs include value that originated from a prior `ResidualUTXI` (a
+recognized gain later deposited into an account and now being spent), direction matters:
 
-`ExchangeResolution` handles these by:
-1. Consuming each residual lot (`residual.consume(...)` → a `UTXIConsumption` in the surface transaction's outputs)
-2. Minting a new `ResidualUTXI` gain in the target position, proportional to the actual proceeds attributable to that residual lot
+- **Carry-back** (`stopAt` ∈ the residual's origin basis): the value is moving back toward its
+  origin. In loop mode, `unwind` surfaces these as `residualCarryBacks`, and `ExchangeResolution`
+  settles each — consuming the residual leg (`residual.consume(...)` → a `UTXIConsumption` in the
+  surface transaction's outputs) and re-recognizing the deferred equity in the target (origin)
+  position, proportional to the proceeds attributable to that sliver. This is what `INV5`
+  exercises (residual-derived CAD converted back into its BTC origin).
+
+- **Forward** (`stopAt` ∉ the residual's origin basis): the value is moving into an unrelated
+  position. The residual is **not** settled — it flows through the forward exchange like any other
+  un-looped value, carrying its lineage onward and leaving the residual edge unresolved. The
+  deferred gain/loss stays at its origin and must not leak "upward" into the destination. This is
+  what `INV5b` guards (the original `event3` bug).
+
+> **Follow-up.** The carry-back currently re-recognizes the deferred equity as the full proceeds
+> attributable to the sliver (correct at unit rates; see the `INV5` `TODO(residual-settlement)`).
+> Precisely netting proceeds against the inherited origin basis — and treating realized/terminal
+> **losses** through the shared expense machinery at origin — requires residuals to retain real
+> suspended-edge basis, and is part of the terminal-resolution generalization.
 
 ---
 
@@ -77,7 +96,8 @@ When consumed inputs include value that originated from a prior `ResidualUTXI` (
 | `collectOriginLeaves(basis)` | `book-value/lineage.ts` | Yes | Reduces a basis tree to its terminal origin-position composition |
 | `collectChainEdges(basis, stopAt)` | `book-value/lineage.ts` | No (internal) | Recursive edge collector; loop vs full mode |
 | `groupRecapturesByExchange(edges)` | `book-value/lineage.ts` | No (internal) | Aggregates `RecaptureEdge[]` by exchange instance |
-| `collectResidualNodes(basis)` | `book-value/lineage.ts` | No (internal) | Finds all `ResidualPath` leaves in a basis tree |
+| `collectCarryBacks(basis, target)` | `book-value/lineage.ts` | Yes | Selects directly-held residual slivers whose origin == `target` (carry-backs) |
+| `collectResidualNodes(basis)` | `book-value/lineage.ts` | No (internal) | Finds all `ResidualPath` leaves in a basis tree (full-mode settlement) |
 
 ---
 

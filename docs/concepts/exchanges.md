@@ -58,18 +58,21 @@ Recapture is the mechanism through which:
 
 ---
 
-## Residuals
+## Residuals — gains are suspended edges, losses are terminal
 
-When a recaptured exchange shows a difference between the locked rate value and the actual proceeds, that difference is recognized as a **residual** lot:
+When a recaptured loop shows a difference between the locked-rate cost basis and the actual proceeds, gains and losses are recognized **asymmetrically**:
 
-| Type | Meaning | Placed in |
+| Outcome | Representation | Placed in |
 |---|---|---|
-| `ResidualUTXI` | A **gain** — proceeds exceeded locked cost basis | Receiving transaction inputs |
-| `ResidualUTXO` | A **loss** — proceeds fell short of locked cost basis | Receiving transaction outputs |
+| **Gain** (proceeds > basis) | `ResidualUTXI` — a *directional suspended residual edge* | Receiving transaction inputs |
+| **Loss** (proceeds < basis) | `TerminalUTXO` — a *terminal settlement record* at the cost-basis origin | A `TerminalAccount` sink (origin position) |
 
-Both types carry an **`originBasis`**: a `Map<Position, bigint>` recording the deep-origin composition of the value they represent. This allows the cost basis engine to trace lineage through residual lots into subsequent exchanges.
+A gain (`ResidualUTXI`) carries an **`originBasis`** (`Map<Position, bigint>`) recording the deep-origin composition it traces back to, and is held in a `ResidualAccount`. It is a *suspended edge*, not movable inventory: when re-exchanged, direction decides its fate (see [Unwind → Residual-Derived Value](../architecture/unwind.md)):
 
-Residuals are registered directly in a `ResidualAccount` (an equity account), where they accumulate as the recognized gain/loss balance.
+- toward one of its origins (`target` ∈ `originBasis`) → **carried back**: the surface leg is closed and the deferred residual re-recognized at the origin using its residual-basis, plus an incremental gain (or a terminal loss if it shrank) for `proceeds − basisAmount`. The origin receives the actual proceeds once — the split only classifies that value.
+- into any other position → **flows forward** as ordinary value, leaving the residual unresolved. The deferred gain never leaks "upward" into the destination.
+
+A **loss is terminal**: it represents unrecovered origin basis. The lost portion of the consumed surface is expensed to its cost-basis origin (a full unwind via {@link ExpenseResolution} into the loss `TerminalAccount`) — never minted as a movable destination lot. A `TerminalUTXO` is output-shaped (so it balances its transaction and is summed for reporting) but is structurally non-consumable: a `TerminalAccount` has no `generateInputs`, holds no `PositionLotStore`, and `TerminalUTXO.consume()` throws.
 
 ---
 

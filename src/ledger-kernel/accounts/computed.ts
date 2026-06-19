@@ -1,8 +1,9 @@
 import type { Orientation } from "../ledger.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI, ResidualUTXO } from "../transactions/cross-position.js";
+import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI } from "../transactions/cross-position.js";
 import type { ExchangeAccountMarker } from "../transactions/cross-position.js";
+import { TerminalUTXO } from "../transactions/terminal.js";
 import { unscale } from "../positions.js";
 import type { AccountNode } from "./node.js";
 import type { AccountSummary } from "./summary.js";
@@ -102,19 +103,19 @@ export class ExchangeAccount extends ComputedAccount implements ExchangeAccountM
 }
 
 /**
- * Tracks recognized gains and losses from exchanges as an equity account. Unlike the scan-based
- * {@link ExchangeAccount}, this account owns its residual lots directly — each
- * {@link ResidualUTXI} (gain) and {@link ResidualUTXO} (loss) is registered here via
- * {@link addResidualInput} / {@link addResidualOutput}, called by {@link ExchangeResolution} and
- * {@link ExpenseResolution}. Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains", "Profit")
- * can coexist without crosstalk because each owns its own lot lists.
+ * Tracks recognized **gains** as an equity account. A gain is a *directional suspended residual
+ * edge*: a {@link ResidualUTXI} carrying its origin-position residual-basis, recognized at its
+ * surface and able to later carry back toward its origin. Unlike the scan-based
+ * {@link ExchangeAccount}, this account owns its residual lots directly — each is registered via
+ * {@link addResidualInput}, called by {@link ExchangeResolution} and {@link ExpenseResolution}.
+ * Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains") can coexist without crosstalk.
  *
- * Gains reduce the root balance (increasing equity inside a positive-orientation equity folder
- * like netIncome); losses increase it.
+ * Losses are **not** held here — they are terminal and settle into a {@link TerminalAccount} at
+ * their cost-basis origin. Gains reduce the root balance (increasing equity inside a
+ * positive-orientation equity folder like netIncome).
  */
 export class ResidualAccount extends ComputedAccount {
     private readonly utxis: ResidualUTXI[] = [];
-    private readonly utxos: ResidualUTXO[] = [];
 
     /**
      * @param negativeLabel - When provided, `summarize()` returns this name instead of `name`
@@ -137,26 +138,15 @@ export class ResidualAccount extends ComputedAccount {
         return utxi;
     }
 
-    public addResidualOutput(quantity: bigint, position: Position, originBasis: Map<Position, bigint>): ResidualUTXO {
-        const utxo = new ResidualUTXO(quantity, position, originBasis, this);
-        this.utxos.push(utxo);
-        return utxo;
-    }
-
     public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         let balance = 0n;
         for (const utxi of this.utxis)
             if (utxi.position === position && utxi.isCommitted(transactions)) balance -= utxi.calculateAvailable(transactions);
-        for (const utxo of this.utxos)
-            if (utxo.position === position && utxo.isCommitted(transactions)) balance += utxo.calculateAvailable(transactions);
         return balance;
     }
 
     public getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
-        const positions = new Set<Position>([
-            ...this.utxis.map(t => t.position),
-            ...this.utxos.map(t => t.position),
-        ]);
+        const positions = new Set<Position>(this.utxis.map(t => t.position));
         const result = new Map<Position, bigint>();
         for (const position of positions) {
             const balance = this.getSignedBalanceScaled(position, transactions);
@@ -167,18 +157,58 @@ export class ResidualAccount extends ComputedAccount {
 }
 
 /**
- * Either a single {@link ResidualAccount} that receives both gains and losses, or a pair that
- * separates them — pass `{ gain, loss }` to route e.g. "Capital Gains" and "Capital Losses"
- * to distinct accounts. All equity-policy functions accept this union transparently.
+ * Routes recognized residual value: gains to a {@link ResidualAccount} (a suspended residual-basis
+ * edge that may later carry back), losses to a {@link TerminalAccount} (a final sink at origin —
+ * losses are terminal, never movable destination lots).
  */
-export type ResidualTarget = ResidualAccount | { gain: ResidualAccount; loss: ResidualAccount; };
+export type ResidualTarget = { gain: ResidualAccount; loss: TerminalAccount; };
 
-/** Returns the account that should receive gain residuals from `target`. */
+/** Returns the {@link ResidualAccount} that should receive gain residuals from `target`. */
 export function gainAccountOf(target: ResidualTarget): ResidualAccount {
-    return target instanceof ResidualAccount ? target : target.gain;
+    return target.gain;
 }
 
-/** Returns the account that should receive loss residuals from `target`. */
-export function lossAccountOf(target: ResidualTarget): ResidualAccount {
-    return target instanceof ResidualAccount ? target : target.loss;
+/** Returns the {@link TerminalAccount} that should sink loss settlements from `target`. */
+export function lossAccountOf(target: ResidualTarget): TerminalAccount {
+    return target.loss;
+}
+
+/**
+ * A **terminal sink** for final origin-basis settlement events — expenses, realized exchange losses,
+ * and negative-residual settlements. Unlike an ordinary {@link Account}, it owns no
+ * {@link PositionLotStore} and has **no** `generateInputs`/`generateOutputs`: it can never be a
+ * transaction *source*, and the {@link TerminalUTXO}s it emits are non-consumable. It therefore
+ * records final settlement value (participating in net-zero and summaries) without ever becoming
+ * spendable inventory.
+ *
+ * Recognitions are minted via {@link recognize}, which returns a {@link TerminalUTXO} the caller
+ * places in a transaction's outputs. The balance is the sum of this account's committed terminal
+ * records — mirroring how an expense {@link Account}'s UTXO debits accumulate.
+ */
+export class TerminalAccount extends ComputedAccount {
+    private readonly terminals: TerminalUTXO[] = [];
+
+    /** Mints a terminal settlement record for `quantity` in `position`, owned by this account. Place it in a transaction's outputs. */
+    public recognize(quantity: bigint, position: Position): TerminalUTXO {
+        const terminal = new TerminalUTXO(quantity, position, this);
+        this.terminals.push(terminal);
+        return terminal;
+    }
+
+    public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
+        let balance = 0n;
+        for (const terminal of this.terminals)
+            if (terminal.position === position && terminal.isCommitted(transactions)) balance += terminal.calculateAvailable(transactions);
+        return balance;
+    }
+
+    public getSignedBalancesScaled(transactions: Transaction[]): Map<Position, bigint> {
+        const positions = new Set<Position>(this.terminals.map(t => t.position));
+        const result = new Map<Position, bigint>();
+        for (const position of positions) {
+            const balance = this.getSignedBalanceScaled(position, transactions);
+            if (balance !== 0n) result.set(position, balance);
+        }
+        return result;
+    }
 }

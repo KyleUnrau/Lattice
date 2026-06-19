@@ -2,7 +2,7 @@ import { BookValueEngine } from "../../equity-policy/book-value/engine.js";
 import { ExchangeResolution } from "../../equity-policy/exchange.js";
 import type { HopTransaction } from "../../equity-policy/recaptures.js";
 import type { Account } from "../../ledger-kernel/accounts/account.js";
-import type { ResidualAccount, ExchangeAccount } from "../../ledger-kernel/accounts/computed.js";
+import type { ResidualAccount, ExchangeAccount, TerminalAccount } from "../../ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";
 import { fifo } from "../../ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "../../ledger-kernel/ledger.js";
@@ -26,9 +26,9 @@ export interface Fixture {
     wallet: Account;
     drawings: Account;
     openingBalance: Account;
-    exchangeExpense: Account;
+    exchangeExpense: TerminalAccount;
     capitalGains: ResidualAccount;
-    capitalLosses: ResidualAccount;
+    capitalLosses: TerminalAccount;
     cadToUsd: ExchangeAccount;
     usdToOranges: ExchangeAccount;
     orangesToCad: ExchangeAccount;
@@ -58,11 +58,11 @@ export function makeFixture(): Fixture {
     const wallet = currentAssets.addAccount("Cryptocurrency Wallet", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const drawings = equity.addAccount("Drawings", Orientation.Negative, fifo<UTXO>, fifo<UTXI>);
-    const exchangeExpense = expenses.addAccount("Exchange Expense", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+    const exchangeExpense = expenses.addTerminalAccount("Exchange Expense", Orientation.Positive);
 
     const netCapitalGains = netIncome.addFolder("Net Capital Gains (Losses)", Orientation.Positive);
     const capitalGains = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
-    const capitalLosses = netCapitalGains.addResidualAccount("Capital Loss", Orientation.Negative);
+    const capitalLosses = netCapitalGains.addTerminalAccount("Capital Loss", Orientation.Negative);
 
     const cadToUsd = equity.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);
     const usdToOranges = equity.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);

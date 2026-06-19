@@ -67,40 +67,35 @@ Each `Account` maintains a per-position `PositionLotStore` created on demand whe
 
 Two concrete subtypes:
 
-### ResidualAccount
+### ResidualAccount (gains)
 
-Owns `ResidualUTXI` (gain) and `ResidualUTXO` (loss) lots. Lots are registered by the equity-policy layer:
+Owns `ResidualUTXI` **gain** lots — *directional suspended residual edges*. Losses are **not** held here: they are terminal and settle into a `TerminalAccount` (below). Lots are registered by the equity-policy layer:
 
 ```ts
 // called by ExchangeResolution / swap() / expense()
-residualAccount.addResidualInput(quantity, position, originBasis)  // gain
-residualAccount.addResidualOutput(quantity, position, originBasis) // loss
+residualAccount.addResidualInput(quantity, position, originBasis)  // gain edge
 ```
 
-Each `ResidualAccount` scans only its own lots for its balance. Multiple residual accounts can coexist (capital gains, FX gains, operating income) without crosstalk.
+Each `ResidualAccount` scans only its own lots for its balance. Multiple residual accounts can coexist (capital gains, FX gains) without crosstalk.
 
-The `originBasis` argument is a `Map<Position, bigint>` that records the deep-origin composition of the residual, enabling the cost basis engine to trace lineage through residual lots in subsequent transactions.
+The `originBasis` argument is a `Map<Position, bigint>` recording the deep-origin composition of the gain — its **residual-basis** — enabling the cost basis engine to trace lineage through residual lots, and enabling carry-back to re-recognize the deferred gain at its origin. Each lot carries a back-reference to the `ResidualAccount` that created it (`ResidualUTXI.account`), so a later carry-back realizes the gain in the **same** account that deferred it.
 
-Every minted lot also carries a back-reference to the `ResidualAccount` that created it (`ResidualUTXI.account` / `ResidualUTXO.account`). This lets a later settlement re-recognize a residual's deferred equity in the **same** account that originally deferred it — when residual-derived value is expensed or re-exchanged, the closed leg's equity shifts position within its own account rather than being routed to an externally supplied one. Because of this, `expense()` needs no residual-target argument at all.
+**Dual-name display** — an optional `negativeLabel` lets `summarize()` show an alternate name when the per-position balance is negative.
 
-**Dual-name display** — an optional `negativeLabel` parameter causes `summarize()` to return an alternate name when the per-position balance is negative, allowing a single account to display as "Capital Gains" when net-positive and "Capital Losses" when net-negative:
+### TerminalAccount (terminal sink)
+
+A computed sink for **final** origin-basis settlements — expenses, realized exchange losses, and negative-residual settlements. It owns **no** `PositionLotStore` and exposes no `generateInputs`/`generateOutputs`: it can never be a transaction *source*. Recognitions are minted via `recognize(quantity, position) → TerminalUTXO` and placed in a transaction's outputs; the balance is the sum of its committed `TerminalUTXO`s. Terminality is structural — a `TerminalUTXO` is excluded from every disposal/selection path and its `consume()` throws — so terminal value can never re-enter circulation as spendable inventory.
 
 ```ts
-// Single account, name adapts to the balance sign
-const capitalGains = netIncome.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
+const exchangeExpense = expenses.addTerminalAccount("Exchange Expense", Orientation.Positive);
+const capitalLosses   = expenses.addTerminalAccount("Capital Loss",     Orientation.Positive);
 ```
 
-**Split gain/loss routing** — the `ResidualTarget` union type accepted by `swap()` and `ExchangeResolution` (for the *new* gain/loss they recognize against proceeds; settlements of pre-existing residuals self-route to their own account) allows gains and losses to be routed to separate accounts:
+**Gain/loss routing** — `ResidualTarget` is `{ gain: ResidualAccount; loss: TerminalAccount }`. Gains recognize as suspended residual edges; losses sink terminally at origin. Use `gainAccountOf(target)` / `lossAccountOf(target)` (from `ledger-kernel/accounts/computed.ts`) to extract one side.
 
 ```ts
-// Two accounts, each receives only one direction
-const capitalGains  = netIncome.addResidualAccount("Capital Gains",  Orientation.Positive);
-const capitalLosses = netIncome.addResidualAccount("Capital Losses", Orientation.Negative);
-
 swap({ ..., residualAccount: { gain: capitalGains, loss: capitalLosses } });
 ```
-
-Use `gainAccountOf(target)` and `lossAccountOf(target)` (exported from `ledger-kernel/accounts/computed.ts`) when you need to extract one account from a `ResidualTarget` in custom policy code.
 
 ### ExchangeAccount
 
@@ -141,5 +136,5 @@ When using scoped accounts, every forward exchange should be explicitly tagged t
 ## Related Documents
 
 - [Transaction Primitives](../concepts/transactions.md) — The UTXO/UTXI lots that accounts generate
-- [Exchanges](../concepts/exchanges.md) — ExchangedUTXO/UTXI and ResidualUTXO/UTXI lot types
+- [Exchanges](../concepts/exchanges.md) — ExchangedUTXO/UTXI, ResidualUTXI (gain edges), and TerminalUTXO (terminal losses)
 - [Disposal Methods](../reference/disposal-methods.md) — How accounts select which lots to consume

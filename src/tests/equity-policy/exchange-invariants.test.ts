@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
-import { ResidualUTXI, ResidualUTXO } from "../../ledger-kernel/transactions/cross-position.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
 import type { Position } from "../../ledger-kernel/positions.js";
 import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
 import { commitSwap, makeFixture, openInto, type Fixture } from "../utils/ledger-fixture.js";
@@ -143,29 +143,31 @@ test("INV3: a recovered-loop residual gain inherits proportional BTC origin basi
 // 4. Residual losses are symmetrical (and preserve origin attribution).
 // ---------------------------------------------------------------------------
 
-test("INV4: a recovered-loop residual loss is symmetrical and preserves BTC origin attribution", () => {
+test("INV4: a recovered-loop loss is terminal — unrecovered basis is settled at its BTC origin, not held as a movable destination lot", () => {
     const f = makeFixture();
     openInto(f, f.wallet, f.btc, 0.02);
     commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad);
     commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 375, f.cadToUsd);
 
-    // Close CAD→USD→CAD: 500 CAD basis returns as only 450 CAD ⇒ 50 CAD loss.
+    // Close CAD→USD→CAD: 500 CAD basis returns as only 450 CAD ⇒ 50 CAD loss = 0.0005 BTC of basis.
     const closing = commitSwap(f, f.cash, f.usd, 375, f.cash, f.cad, 450, f.usdToCad);
 
     assert.ok(f.ledger.verify().ok);
 
-    // The loss is the mirror of the gain: a ResidualUTXO carrying the same proportional BTC basis.
-    assert.equal(closing.resolution.createdResiduals.length, 1);
-    const residual = closing.resolution.createdResiduals[0]!;
-    assert.ok(residual instanceof ResidualUTXO, "a loss is recognized as a ResidualUTXO");
-    assert.equal(residual.quantity, 5000n, "50 CAD loss");
-    assert.equal(residual.originBasis.get(f.btc), 50000n, "loss inherits 0.0005 BTC origin basis");
+    // A loss is NOT a movable residual gain. No gain residual is created; the loss is terminal.
+    assert.equal(closing.resolution.createdResiduals.length, 0, "no gain residual on a losing loop");
+    assert.notEqual(closing.resolution.terminalLoss, null, "the loss is settled terminally (an expense to origin)");
 
-    // 50 CAD loss recognized (capital-loss account carries the residual lot); loop accounts settled.
-    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.cad, f.ledger.transactions), 5000n);
+    // KEY INVARIANT: the loss lands at its cost-basis ORIGIN (BTC), through the terminal loss
+    // account — NOT as a destination-CAD lot. 50 CAD lost = 0.0005 BTC of unrecovered basis.
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.btc, f.ledger.transactions), 50000n, "0.0005 BTC loss recognized at the BTC origin");
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "nothing held in destination CAD");
+
+    // The inner loop is settled; the BTC→CAD leg is partially unsuspended for exactly the lost slice.
     assert.equal(open(f, f.cadToUsd, f.cad), 0n);
     assert.equal(open(f, f.cadToUsd, f.usd), 0n);
     assert.equal(open(f, f.usdToCad, f.cad), 0n);
+    assert.equal(open(f, f.btcToCad, f.btc), 950000n, "0.01 BTC less the 0.0005 BTC reclaimed for the loss");
 });
 
 // ---------------------------------------------------------------------------
@@ -253,6 +255,38 @@ test("INV5b: residual-derived value exchanged into a non-origin target flows for
     // never re-anchored to CAD or USD by a spurious re-mint.
     const usdLot = lotsOf(f, f.cash, f.usd).find(u => u.calculateAvailable(f.ledger.transactions) > 0n)!;
     assert.deepEqual([...originOf(f, usdLot).keys()], [f.btc], "USD basis still traces to the BTC origin");
+});
+
+// ---------------------------------------------------------------------------
+// 5c. Carry-back at a non-unit rate splits the residual realization (no double-count).
+// ---------------------------------------------------------------------------
+
+test("INV5c: carrying a gain residual back at a NON-unit rate re-recognizes it at origin and recognizes only the incremental as extra gain — total realized = actual proceeds", () => {
+    const f = makeFixture();
+    openInto(f, f.wallet, f.btc, 0.02);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad);  // 0.01 BTC → 1000 CAD
+    commitSwap(f, f.cash, f.cad, 1000, f.cash, f.usd, 750, f.cadToUsd);     // 1000 CAD → 750 USD
+    commitSwap(f, f.cash, f.usd, 750, f.cash, f.cad, 1100, f.usdToCad);     // loop: 100 CAD gain, 0.001 BTC residual-basis
+
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -10000n, "100 CAD gain deferred in CAD");
+
+    // Carry all 1100 CAD back into BTC, but at an APPRECIATED rate: 1100 CAD = 0.0121 BTC.
+    // The recovered 1000 CAD (BTC-derived) gains 0.001 BTC; the 100 CAD residual's proceeds
+    // (0.0011 BTC) exceed its 0.001 BTC residual-basis, so the carry-back splits into a 0.001 BTC
+    // re-recognition + a 0.0001 BTC incremental gain.
+    commitSwap(f, f.cash, f.cad, 1100, f.wallet, f.btc, 0.0121, f.cadToBtc);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after a non-unit carry-back");
+
+    // The deferred CAD gain is reversed and realized in BTC; nothing double-counts.
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "deferred CAD gain reversed");
+    // Total BTC gain = loop 0.001 + re-recognition 0.001 + incremental 0.0001 = 0.0021 BTC.
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.btc, f.ledger.transactions), -210000n, "0.0021 BTC total gain realized at origin");
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.btc, f.ledger.transactions), 0n, "no loss — every leg appreciated");
+
+    // Economic truth: 0.01 BTC round-tripped to 0.0121 BTC; wallet = 0.01 untouched + 0.0121.
+    assert.equal(f.wallet.getBalance(f.btc, f.ledger.transactions), 0.0221);
+    assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 0);
 });
 
 // ---------------------------------------------------------------------------

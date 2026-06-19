@@ -9,8 +9,8 @@ import {
     ExchangedUTXI,
     ExchangedUTXO,
     ResidualUTXI,
-    ResidualUTXO,
 } from "../../ledger-kernel/transactions/cross-position.js";
+import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
 
 /**
  * Renders a set of {@link Transaction}s into a draw.io (`.drawio`) diagram of the underlying
@@ -102,7 +102,7 @@ function isConsumption(node: LotLike): boolean {
     return node instanceof UTXOConsumption || node instanceof UTXIConsumption;
 }
 function isResidual(node: LotLike): boolean {
-    return node instanceof ResidualUTXI || node instanceof ResidualUTXO;
+    return node instanceof ResidualUTXI || node instanceof TerminalUTXO;
 }
 /** Lane nodes hold value on the top band; consumptions and residuals are stacked beneath. */
 function isLane(node: LotLike): boolean {
@@ -117,8 +117,8 @@ function classify(node: LotLike): Pick<NodeRec, "typeName" | "style" | "isStack"
         return { typeName: "UTXI Settled", style: GREEN_HEXAGON, isStack: true, position: node.source.position, quantity: node.quantity };
 
     // Order matters: subclasses before their base classes.
-    if (node instanceof ResidualUTXO)
-        return { typeName: "ResidualUTXO", style: VIOLET_BOX, isStack: true, position: node.position, quantity: node.quantity };
+    if (node instanceof TerminalUTXO)
+        return { typeName: "TerminalUTXO", style: VIOLET_BOX, isStack: true, position: node.position, quantity: node.quantity };
     if (node instanceof ResidualUTXI)
         return { typeName: "ResidualUTXI", style: VIOLET_DASHED_BOX, isStack: true, position: node.position, quantity: node.quantity };
     if (node instanceof ExchangedUTXO)
