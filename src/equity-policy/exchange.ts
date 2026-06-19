@@ -151,11 +151,16 @@ export class ExchangeResolution {
             // the proceeds only back `Pl = B − loss`. So split the **role-pure** target reclaims (the
             // loop principal; carry-back/forward never appear here): settle `Pl` into the proceeds and
             // full-unwind the lost `B − Pl` slice to origin (a terminal loss into the loss account).
+            //
+            // The lost slice is prorated across the reclaims by each one's recovered-basis share, not
+            // taken from the front of the list. When a loop recovers basis from several distinct
+            // origins (one reclaim each), this terminalizes the loss at every origin proportionally
+            // rather than dumping it all on whichever reclaim happens to be first.
             const loss = -this.recaptureResolution.residualQuantity;
             const targetReclaims = this.recaptureResolution.recaptures
                 .filter(r => r.reclaim.source.position === this.toPosition)
                 .map(r => r.reclaim);
-            const [lostReclaims, keptReclaims] = splitInputs(targetReclaims, loss);
+            const [lostReclaims, keptReclaims] = this.prorateReclaimLoss(targetReclaims, loss);
             this.keptTargetReclaims = keptReclaims;
             this.terminalLoss = lostReclaims.length > 0
                 ? new TerminalResolution(lostReclaims, transactions, engine, lossAccountOf(residualTarget))
@@ -361,6 +366,29 @@ export class ExchangeResolution {
         }
 
         return { closedOutputs: closeOutputs, mintedInputs: mintInputs, terminalLossOutputs, enclosingRecaptures, hopCloseSettlements };
+    }
+
+    // Splits the role-pure target `reclaims` (the recovered loop principal) into a lost portion
+    // summing to `loss` and a kept portion, prorating the loss across each reclaim by its
+    // recovered-basis share. The last reclaim absorbs any rounding remainder so the lost portion
+    // totals exactly `loss`. This spreads a multi-origin loop loss across every origin proportionally
+    // rather than draining the first reclaim before touching the next.
+    private prorateReclaimLoss(reclaims: Input[], loss: bigint): [Input[], Input[]] {
+        const totalBasis = reclaims.reduce((sum, r) => sum + r.quantity, 0n);
+        const lost: Input[] = [];
+        const kept: Input[] = [];
+        let allocated = 0n;
+        for (let i = 0; i < reclaims.length; i++) {
+            const reclaim = reclaims[i]!;
+            const lostHere = i === reclaims.length - 1
+                ? loss - allocated
+                : (totalBasis > 0n ? reclaim.quantity * loss / totalBasis : 0n);
+            allocated += lostHere;
+            const [lostPart, keptPart] = splitInputs([reclaim], lostHere);
+            lost.push(...lostPart);
+            kept.push(...keptPart);
+        }
+        return [lost, kept];
     }
 
     /** Outputs for the consuming/surface transaction: surface-position recapture settlements (loop and nested-carry-back enclosing edges), the forward from-side, and directly-held closed carry-back legs. */

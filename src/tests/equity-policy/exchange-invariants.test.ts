@@ -171,6 +171,45 @@ test("INV4: a recovered-loop loss is terminal — unrecovered basis is settled a
 });
 
 // ---------------------------------------------------------------------------
+// 4b. A loop loss whose recovered basis spans multiple origins must prorate the
+//     terminal loss across those origins, never front-load it onto the first reclaim.
+// ---------------------------------------------------------------------------
+
+test("INV4b: a loop loss with recovered basis from two distinct origins prorates the terminal loss across both, not onto whichever reclaim is first", () => {
+    const f = makeFixture();
+
+    // Two equal CAD lots from two distinct origins:
+    //   • 500 CAD derived from 500 USD (origin USD, rate 1:1)
+    //   • 500 CAD derived from 0.01 BTC (origin BTC)
+    openInto(f, f.cash, f.usd, 500);
+    commitSwap(f, f.cash, f.usd, 500, f.cash, f.cad, 500, f.usdToCad);     // 500 CAD, origin USD
+    openInto(f, f.wallet, f.btc, 0.01);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 500, f.btcToCad);  // 500 CAD, origin BTC
+
+    // Forward each CAD lot into Oranges as a SEPARATE edge, so the loop has two distinct ancestor
+    // reclaims (one per origin). FIFO consumes the USD-derived lot first, so the USD reclaim is first.
+    commitSwap(f, f.cash, f.cad, 500, f.inventory, f.oranges, 500, f.cadToOranges); // edge1: CAD(USD)→Oranges
+    commitSwap(f, f.cash, f.cad, 500, f.inventory, f.oranges, 500, f.cadToOranges); // edge2: CAD(BTC)→Oranges
+
+    // Close the loop back to CAD at a LOSS: 1000 CAD of recovered basis returns as only 800 CAD ⇒
+    // 200 CAD loss. Recovered basis is 50% USD-origin + 50% BTC-origin, so the loss must split 50/50.
+    const closing = commitSwap(f, f.inventory, f.oranges, 1000, f.cash, f.cad, 800, f.orangesToCad);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after a multi-origin loop loss");
+
+    // No movable residual loss is created; the loss is terminal.
+    assert.equal(closing.resolution.createdResiduals.length, 0, "no gain residual on a losing loop");
+    assert.notEqual(closing.resolution.terminalLoss, null, "the loss is terminal");
+
+    // KEY INVARIANT: the 200 CAD loss is PRORATED across the two origin reclaims (100 CAD each),
+    // not front-loaded onto whichever reclaim appears first. 100 CAD of USD-basis = 100 USD;
+    // 100 CAD of BTC-basis = 0.002 BTC. Neither origin absorbs the whole loss.
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.usd, f.ledger.transactions), 10000n, "100 USD of the loss lands at the USD origin");
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.btc, f.ledger.transactions), 200000n, "0.002 BTC of the loss lands at the BTC origin");
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "nothing terminalized in the CAD loop position");
+});
+
+// ---------------------------------------------------------------------------
 // 5. Residual-derived value settles when it later closes back to its origin asset.
 // ---------------------------------------------------------------------------
 
