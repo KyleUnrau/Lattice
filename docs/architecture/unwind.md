@@ -67,10 +67,19 @@ recognized gain later deposited into an account and now being spent), direction 
 
 - **Carry-back** (`stopAt` ∈ the residual's origin basis): the value is moving back toward its
   origin. In loop mode, `unwind` surfaces these as `residualCarryBacks`, and `ExchangeResolution`
-  settles each — consuming the residual leg (`residual.consume(...)` → a `UTXIConsumption` in the
-  surface transaction's outputs) and re-recognizing the deferred equity in the target (origin)
-  position, proportional to the proceeds attributable to that sliver. This is what `INV5`
-  exercises (residual-derived CAD converted back into its BTC origin).
+  settles each — consuming the residual leg (`residual.consume(...)` → a `UTXIConsumption`) and
+  re-recognizing the deferred equity in the target (origin) position. The realization **splits**:
+  `basisAmount` (the residual-basis re-denomination) is re-recognized at origin, and the incremental
+  `proceeds − basisAmount` is an extra gain (or a terminal loss if the residual shrank). The origin
+  receives the proceeds once — the split only classifies that value. `INV5` exercises the unit-rate
+  round trip; `INV5c` the non-unit split.
+
+  A carry-back can be **nested**: the residual's value moved forward (e.g. CAD→USD) before returning
+  toward origin, so the residual sits *behind* one or more forward exchange edges. `collectCarryBacks`
+  recurses through those edges (recording the enclosing chain), and `ExchangeResolution` recaptures
+  each enclosing edge for the residual's portion to rewind the value back to the residual's own
+  surface, where the leg closes (threaded as a hop via an injected settlement). `INV5e` exercises
+  this (a residual created in CAD, moved to USD, carried back when USD returns to BTC).
 
 - **Forward** (`stopAt` ∉ the residual's origin basis): the value is moving into an unrelated
   position. The residual is **not** settled — it flows through the forward exchange like any other
@@ -78,11 +87,12 @@ recognized gain later deposited into an account and now being spent), direction 
   deferred gain/loss stays at its origin and must not leak "upward" into the destination. This is
   what `INV5b` guards (the original `event3` bug).
 
-> **Follow-up.** The carry-back currently re-recognizes the deferred equity as the full proceeds
-> attributable to the sliver (correct at unit rates; see the `INV5` `TODO(residual-settlement)`).
-> Precisely netting proceeds against the inherited origin basis — and treating realized/terminal
-> **losses** through the shared expense machinery at origin — requires residuals to retain real
-> suspended-edge basis, and is part of the terminal-resolution generalization.
+A recovered **loop loss** (proceeds below the recovered basis) is *terminal* at the loop's origin.
+It is resolved on the role-pure target reclaims, not by carving the consumed surface: the loop
+reclaims are split into the proceeds-backing portion and the shortfall, and the shortfall is
+full-unwound to origin (an `ExpenseResolution` into the loss `TerminalAccount`). Resolving the loss
+on the reclaims keeps any carry-back/forward surface intact when a single consumed lot blends loop
+capital with residual-derived value — `INV5d` exercises a carry-back and a loop loss in one exchange.
 
 ---
 
@@ -92,11 +102,11 @@ recognized gain later deposited into an account and now being spent), direction 
 |---|---|---|---|
 | `unwind(basis, stopAt)` | `recaptures.ts` | Yes | Main entry point; returns `UnwindPlan` |
 | `executeRecaptures(plan, transactions)` | `recaptures.ts` | Yes | Issues one `Recapture` per exchange in plan |
-| `classifyRecaptures(recaptures, surface)` | `recaptures.ts` | Yes | Partitions recaptures into surface settlements, hops, and terminal reclaims |
+| `classifyRecaptures(recaptures, surface, injected?)` | `recaptures.ts` | Yes | Partitions recaptures into surface settlements, hops, and terminal reclaims; `injected` settlements (e.g. a nested carry-back close) balance a position as a hop |
 | `collectOriginLeaves(basis)` | `book-value/lineage.ts` | Yes | Reduces a basis tree to its terminal origin-position composition |
 | `collectChainEdges(basis, stopAt)` | `book-value/lineage.ts` | No (internal) | Recursive edge collector; loop vs full mode |
 | `groupRecapturesByExchange(edges)` | `book-value/lineage.ts` | No (internal) | Aggregates `RecaptureEdge[]` by exchange instance |
-| `collectCarryBacks(basis, target)` | `book-value/lineage.ts` | Yes | Selects directly-held residual slivers whose origin == `target` (carry-backs) |
+| `collectCarryBacks(basis, target)` | `book-value/lineage.ts` | Yes | Selects residual slivers whose origin includes `target` (carry-backs), recursing through forward edges to find nested ones and recording the enclosing-edge chain |
 | `collectResidualNodes(basis)` | `book-value/lineage.ts` | No (internal) | Finds all `ResidualPath` leaves in a basis tree (full-mode settlement) |
 
 ---
