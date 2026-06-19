@@ -80,8 +80,8 @@ export function executeRecaptures(plan: UnwindPlan, transactions: Transaction[])
 
 /** Partitions executed recaptures by the role each position plays in the unwound chain. */
 export interface RecaptureClassification {
-    /** Settlements landing in the surface position — belong in the consuming transaction. */
-    surfaceSettlements: UTXIConsumption[];
+    /** Settlements landing in the surface position — belong in the consuming transaction. Recapture to-side settlements plus any injected settlements (e.g. a directly-held residual close) at the surface. */
+    surfaceSettlements: Output[];
     /** Summed quantity of {@link surfaceSettlements}; pre-computed so callers avoid a redundant reduce. */
     surfaceSettled: bigint;
     /** Intermediate positions crossed by a multi-hop unwind; each transaction nets to zero. */
@@ -99,8 +99,16 @@ export interface RecaptureClassification {
  *   whose inputs reclaim the inner edge and whose outputs settle the next — netting to zero;
  * - a position that is reclaimed but not settled is a **terminal reclaim** (an origin for a full
  *   unwind, the target for a loop closure).
+ *
+ * `injectedSettlements` adds non-recapture settlement outputs at a position (e.g. a nested
+ * carry-back's residual-leg close), so that position is balanced as a hop (or folded into the
+ * surface settlements when it *is* the surface) rather than mistaken for a terminal reclaim.
  */
-export function classifyRecaptures(recaptures: Recapture[], surfacePosition: Position): RecaptureClassification {
+export function classifyRecaptures(
+    recaptures: Recapture[],
+    surfacePosition: Position,
+    injectedSettlements: { position: Position; outputs: Output[] }[] = []
+): RecaptureClassification {
     const reclaims = new Map<Position, Recapture[]>(); // recapture.reclaim reclaims value into this position
     const settles = new Map<Position, Recapture[]>();  // recapture.settlement settles value in this position
     const add = (map: Map<Position, Recapture[]>, position: Position, recapture: Recapture): void => {
@@ -113,17 +121,33 @@ export function classifyRecaptures(recaptures: Recapture[], surfacePosition: Pos
         add(settles, recapture.settlement.source.position, recapture);
     }
 
+    const injected = new Map<Position, Output[]>();
+    for (const { position, outputs } of injectedSettlements) {
+        const group = injected.get(position);
+        if (group) group.push(...outputs);
+        else injected.set(position, [...outputs]);
+    }
+
     const hops: HopTransaction[] = [];
     const terminalReclaims = new Map<Position, Recapture[]>();
     for (const [position, group] of reclaims) {
-        if (settles.has(position) && position !== surfacePosition) {
-            hops.push({ position, inputs: group.map(r => r.reclaim), outputs: settles.get(position)!.map(r => r.settlement) });
+        const injectedOutputs = injected.get(position) ?? [];
+        if ((settles.has(position) || injectedOutputs.length > 0) && position !== surfacePosition) {
+            hops.push({
+                position,
+                inputs: group.map(r => r.reclaim),
+                outputs: [...(settles.get(position) ?? []).map(r => r.settlement), ...injectedOutputs],
+            });
+            injected.delete(position);
         } else {
             terminalReclaims.set(position, group);
         }
     }
 
-    const surfaceSettlements = (settles.get(surfacePosition) ?? []).map(r => r.settlement);
+    const surfaceSettlements = [
+        ...(settles.get(surfacePosition) ?? []).map(r => r.settlement),
+        ...(injected.get(surfacePosition) ?? []),
+    ];
     const surfaceSettled = surfaceSettlements.reduce((s, o) => s + o.quantity, 0n);
     return { surfaceSettlements, surfaceSettled, hops, terminalReclaims };
 }

@@ -1,4 +1,4 @@
-import type { BasisPath, ResidualPath } from "./engine.js";
+import type { BasisPath, ExchangePath, ResidualPath } from "./engine.js";
 import type { Position } from "../../ledger-kernel/positions.js";
 import type { Exchange, ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
 
@@ -21,6 +21,12 @@ export type RecaptureEdge = {
  *
  * Slivers whose origin does **not** match the target are *not* represented here: they stay
  * unresolved residual edges and their surface movement falls through into a plain forward exchange.
+ *
+ * A residual can also be reached *through* one or more forward exchange edges (its value moved on
+ * before returning toward origin) — a **nested** carry-back. {@link enclosingEdges} records that
+ * chain of edges (outermost first), each carrying the residual's proportional share so the value can
+ * be rewound from the consuming surface back to the residual's own surface, where its leg closes. A
+ * directly-held (top-level) residual has an empty chain and `surfacePosition === the consuming surface`.
  */
 export type ResidualCarryBack = {
     residual: ResidualUTXI;
@@ -28,6 +34,8 @@ export type ResidualCarryBack = {
     surfaceQuantity: bigint;
     originPosition: Position;
     basisAmount: bigint;
+    /** Enclosing forward edges between the consuming surface and the residual's surface, outermost first; empty when directly held. */
+    enclosingEdges: RecaptureEdge[];
 };
 
 /**
@@ -117,32 +125,61 @@ export function collectChainEdges(
 
 /**
  * Selects the **carry-back** slivers from a consumed basis tree for a loop-mode target. A residual
- * is a directional suspended edge from its origin positions to its surface; a directly-held residual
- * (a top-level {@link ResidualPath}) whose origin basis includes `target` carries that sliver back —
- * settling its surface leg and recovering its origin basis. Slivers whose origin differs, and
- * residuals nested behind a still-open forward exchange, are left unresolved (they flow forward).
+ * is a directional suspended edge from its origin positions to its surface; a residual whose origin
+ * basis includes `target` carries that sliver back — settling its surface leg and recovering its
+ * origin basis. Slivers whose origin does not include `target` are left unresolved (they flow forward).
  *
- * Only top-level residual nodes are considered: a residual reached through an exchange edge sits
- * behind an open forward exchange and must not be force-resolved by moving toward one of its origins.
+ * The walk recurses **through forward exchange edges** to discover *nested* carry-backs — a residual
+ * whose value moved forward (e.g. CAD→USD) before later returning toward its origin. The chain of
+ * enclosing edges is recorded on each {@link ResidualCarryBack} (outermost first), scaled so each
+ * edge reclaims the residual's proportional share down to the residual's own surface, where the leg
+ * closes. Loop-ancestor edges (whose from-side is already the `target`) are not recursed into: their
+ * from-side is the origin position itself, so nothing behind them carries back toward `target`.
  */
 export function collectCarryBacks(basis: BasisPath[], target: Position): ResidualCarryBack[] {
     const carryBacks: ResidualCarryBack[] = [];
-    for (const path of basis) {
-        if (path.type !== "residual") continue;
-        const originTotal = [...path.originBasis.values()].reduce((s, q) => s + q, 0n);
-        const basisAmount = path.originBasis.get(target);
-        if (basisAmount === undefined || basisAmount <= 0n || originTotal <= 0n) continue;
-        const surfaceQuantity = path.quantity * basisAmount / originTotal;
-        if (surfaceQuantity <= 0n) continue;
-        carryBacks.push({
-            residual: path.residual,
-            surfacePosition: path.residual.position,
-            surfaceQuantity,
-            originPosition: target,
-            basisAmount,
-        });
-    }
+    collectCarryBacksInto(basis, target, [], carryBacks);
     return carryBacks;
+}
+
+function collectCarryBacksInto(
+    basis: BasisPath[],
+    target: Position,
+    chain: ExchangePath[],
+    out: ResidualCarryBack[]
+): void {
+    for (const path of basis) {
+        if (path.type === "residual") {
+            const originTotal = [...path.originBasis.values()].reduce((s, q) => s + q, 0n);
+            const basisAmount = path.originBasis.get(target);
+            if (basisAmount === undefined || basisAmount <= 0n || originTotal <= 0n) continue;
+            const surfaceQuantity = path.quantity * basisAmount / originTotal;
+            if (surfaceQuantity <= 0n) continue;
+
+            // Scale the residual's surface share up through each enclosing edge's locked rate, from
+            // innermost to outermost, so each edge reclaims exactly the residual's portion. Stored
+            // outermost-first; `enclosingEdges[0].toQuantity` is the footprint in the consuming surface.
+            const enclosingEdges: RecaptureEdge[] = [];
+            let reclaim = surfaceQuantity;
+            for (let i = chain.length - 1; i >= 0; i--) {
+                const ex = chain[i]!.exchange;
+                const toQuantity = ex.to.quantity * reclaim / ex.from.quantity;
+                enclosingEdges.unshift({ exchange: ex, toQuantity, fromQuantity: reclaim });
+                reclaim = toQuantity;
+            }
+
+            out.push({
+                residual: path.residual,
+                surfacePosition: path.residual.position,
+                surfaceQuantity,
+                originPosition: target,
+                basisAmount,
+                enclosingEdges,
+            });
+        } else if (path.type === "exchange" && path.exchange.from.position !== target) {
+            collectCarryBacksInto(path.basis, target, [...chain, path], out);
+        }
+    }
 }
 
 /**

@@ -12,12 +12,16 @@ import { collectOriginLeaves, type ResidualCarryBack } from "./book-value/lineag
 import { ExpenseResolution } from "./expense.js";
 
 interface ResidualSettlement {
-    /** Surface-position settlements closing the carried-back residual legs (consuming/from transaction). */
+    /** Surface-position settlements closing the legs of *directly-held* carried-back residuals (consuming/from transaction). */
     closedOutputs: Output[];
     /** Target-position gain re-recognitions: the deferred residual re-expressed at origin (`basisAmount`) plus any positive incremental gain. */
     mintedInputs: Input[];
     /** Target-position terminal losses: the *negative* incremental of a carry-back (residual shrinkage), settled to the loss sink at origin. */
     terminalLossOutputs: Output[];
+    /** Nested carry-backs only: recaptures of the enclosing forward edges that rewind the residual's value back to its own surface. */
+    enclosingRecaptures: Recapture[];
+    /** Nested carry-backs only: each residual's leg close, injected as a settlement at the residual's surface position (which becomes a hop). */
+    hopCloseSettlements: { position: Position; outputs: Output[] }[];
 }
 
 // Internal intermediate shape — not part of the public API.
@@ -212,8 +216,10 @@ export class ExchangeResolution {
         // un-looped value, carrying its lineage onward, so a residual never leaks "upward" into an
         // unrelated target. (Carry-backs settle in the surface position; only directly-held residuals
         // are surfaced as carry-backs, so their surface == this surface position.)
+        // A carry-back's footprint in the *consuming surface* position is the outermost enclosing
+        // edge's to-side (for a nested carry-back) or its own surface quantity (directly held).
         const residualCarryBacks = plan.residualCarryBacks;
-        const carryBackSurfaceTotal = residualCarryBacks.reduce((sum, c) => sum + c.surfaceQuantity, 0n);
+        const carryBackSurfaceTotal = residualCarryBacks.reduce((sum, c) => sum + (c.enclosingEdges[0]?.toQuantity ?? c.surfaceQuantity), 0n);
         const residualDerivedProceeds = fromQuantity > 0n ? outputQuantity * carryBackSurfaceTotal / fromQuantity : 0n;
 
         // The forward portion is whatever surface value neither looped nor carried a residual back.
@@ -288,37 +294,57 @@ export class ExchangeResolution {
     }
 
     // Residual-derived value carried back to its origin (target == the residual's origin): close the
-    // matching residual leg in the surface position and realize it at the origin. `basisAmount` is
-    // residual-basis — the origin-position re-denomination of the deferred residual — *not* recovered
-    // principal. So the realization SPLITS into two lines that together equal the actual proceeds
-    // (the origin receives proceeds once; the split only classifies that value):
+    // matching residual leg and realize it at the origin. `basisAmount` is residual-basis — the
+    // origin-position re-denomination of the deferred residual — *not* recovered principal. So the
+    // realization SPLITS into two lines that together equal the actual proceeds (the origin receives
+    // proceeds once; the split only classifies that value):
     //   • re-recognize the deferred residual at origin using `basisAmount` (a gain, in the residual's
     //     own account so its equity is realized where it was deferred);
     //   • the incremental `proceeds − basisAmount` is an additional gain if positive, or — if the
     //     residual shrank — a *terminal loss* settled to the loss sink at the origin (never a movable lot).
-    // Residual slivers whose origin is *not* the target are absent here — they flow forward instead.
+    //
+    // A *directly-held* residual closes its leg in the consuming (surface) transaction. A *nested*
+    // residual (reached through forward edges) first rewinds the value to its own surface by
+    // recapturing each enclosing edge for its portion; the leg then closes at that surface, which the
+    // hop machinery threads as an intermediate position. Residual slivers whose origin is *not* the
+    // target are absent here — they flow forward instead.
     private settleCarryBacks(
         toPosition: Position,
         recaptureResolution: ExchangeRecaptureResolution,
         target: ResidualTarget
     ): ResidualSettlement {
         const carryBacks = recaptureResolution.residualCarryBacks;
-        if (carryBacks.length === 0) return { closedOutputs: [], mintedInputs: [], terminalLossOutputs: [] };
+        const empty: ResidualSettlement = { closedOutputs: [], mintedInputs: [], terminalLossOutputs: [], enclosingRecaptures: [], hopCloseSettlements: [] };
+        if (carryBacks.length === 0) return empty;
 
         const closeOutputs: Output[] = [];
         const mintInputs: Input[] = [];
         const terminalLossOutputs: Output[] = [];
-        const totalSurface = carryBacks.reduce((sum, c) => sum + c.surfaceQuantity, 0n);
+        const enclosingRecaptures: Recapture[] = [];
+        const hopCloseSettlements: { position: Position; outputs: Output[] }[] = [];
+
+        // Proceeds are prorated by each carry-back's footprint in the consuming surface (the same
+        // quantity that fed `residualDerivedProceeds`), so the split matches the proceeds exactly.
+        const footprint = (c: ResidualCarryBack): bigint => c.enclosingEdges[0]?.toQuantity ?? c.surfaceQuantity;
+        const totalFootprint = carryBacks.reduce((sum, c) => sum + footprint(c), 0n);
         let allocated = 0n;
 
         for (let i = 0; i < carryBacks.length; i++) {
             const carryBack = carryBacks[i]!;
-            closeOutputs.push(carryBack.residual.consume(carryBack.surfaceQuantity, this.transactions));
+            const close = carryBack.residual.consume(carryBack.surfaceQuantity, this.transactions);
+
+            if (carryBack.enclosingEdges.length === 0) {
+                closeOutputs.push(close);
+            } else {
+                for (const edge of carryBack.enclosingEdges)
+                    enclosingRecaptures.push(edge.exchange.recapture(edge.toQuantity, this.transactions));
+                hopCloseSettlements.push({ position: carryBack.surfacePosition, outputs: [close] });
+            }
 
             // The actual target proceeds attributable to this sliver (the last absorbs rounding).
             const proceeds = i === carryBacks.length - 1
                 ? recaptureResolution.residualDerivedProceeds - allocated
-                : recaptureResolution.residualDerivedProceeds * carryBack.surfaceQuantity / totalSurface;
+                : recaptureResolution.residualDerivedProceeds * footprint(carryBack) / totalFootprint;
             allocated += proceeds;
 
             // Re-recognize the deferred residual at origin (residual-basis denomination).
@@ -334,13 +360,14 @@ export class ExchangeResolution {
                 terminalLossOutputs.push(lossAccountOf(target).recognize(-incremental, toPosition));
         }
 
-        return { closedOutputs: closeOutputs, mintedInputs: mintInputs, terminalLossOutputs };
+        return { closedOutputs: closeOutputs, mintedInputs: mintInputs, terminalLossOutputs, enclosingRecaptures, hopCloseSettlements };
     }
 
-    /** Outputs for the consuming/surface transaction: surface-position recapture settlements, the forward from-side, and closed carry-back legs. */
+    /** Outputs for the consuming/surface transaction: surface-position recapture settlements (loop and nested-carry-back enclosing edges), the forward from-side, and directly-held closed carry-back legs. */
     public getFromOutputs(): Output[] {
         return [
             ...this.recaptureResolution.recaptures.filter(r => r.settlement.source.position === this.fromPosition).map(r => r.settlement),
+            ...this.settledResiduals.enclosingRecaptures.filter(r => r.settlement.source.position === this.fromPosition).map(r => r.settlement),
             ...(this.exchange ? [this.exchange.from] : []),
             ...this.settledResiduals.closedOutputs,
         ];
@@ -398,7 +425,10 @@ export class ExchangeResolution {
      * Commit these (in array order) between the consuming and receiving transactions.
      */
     public getRecaptureHops(): HopTransaction[] {
-        return classifyRecaptures(this.recaptureResolution.recaptures, this.fromPosition).hops;
+        // Thread the loop recaptures together with any nested carry-back enclosing recaptures, and
+        // inject each nested residual's leg close so its surface position is balanced as a hop.
+        const combined = [...this.recaptureResolution.recaptures, ...this.settledResiduals.enclosingRecaptures];
+        return classifyRecaptures(combined, this.fromPosition, this.settledResiduals.hopCloseSettlements).hops;
     }
 
     public constructIntermediateTransactions(): TransactionGroup {
