@@ -9,7 +9,7 @@ import { classifyRecaptures, executeRecaptures, unwind, type Recapture } from ".
 import { ExchangeAccount, gainAccountOf, lossAccountOf, type ResidualTarget } from "../ledger-kernel/accounts/computed.js";
 import { type HopTransaction } from "./recaptures.js";
 import { collectOriginLeaves, type ResidualCarryBack } from "./book-value/lineage.js";
-import { ExpenseResolution } from "./expense.js";
+import { TerminalResolution } from "./terminal.js";
 
 interface ResidualSettlement {
     /** Surface-position settlements closing the legs of *directly-held* carried-back residuals (consuming/from transaction). */
@@ -97,7 +97,7 @@ export class ExchangeTransactions {
  * unrecovered origin basis, which is *terminal*. The loss is resolved on the *target* side, not by
  * carving the consumed surface: the loop's **role-pure** target reclaims are split into the
  * proceeds-backing portion (which settles into the target) and the unrecovered shortfall, and the
- * shortfall is full-unwound to its cost-basis origin through an internal {@link ExpenseResolution}
+ * shortfall is full-unwound to its cost-basis origin through an internal {@link TerminalResolution}
  * into the loss {@link TerminalAccount} — never minted as a movable destination lot. Resolving the
  * loss on the reclaims (rather than the surface) keeps any carry-back/forward surface intact even
  * when a single consumed lot blends loop capital with residual-derived value.
@@ -111,9 +111,9 @@ export class ExchangeResolution {
     public readonly settledResiduals: ResidualSettlement;
     /**
      * For a losing exchange: the terminal settlement of the lost surface portion to its cost-basis
-     * origin (an {@link ExpenseResolution} into the loss {@link TerminalAccount}). `null` otherwise.
+     * origin (an {@link TerminalResolution} into the loss {@link TerminalAccount}). `null` otherwise.
      */
-    public readonly terminalLoss: ExpenseResolution | null;
+    public readonly terminalLoss: TerminalResolution | null;
 
     private readonly recaptureResolution: ExchangeRecaptureResolution;
 
@@ -158,7 +158,7 @@ export class ExchangeResolution {
             const [lostReclaims, keptReclaims] = splitInputs(targetReclaims, loss);
             this.keptTargetReclaims = keptReclaims;
             this.terminalLoss = lostReclaims.length > 0
-                ? new ExpenseResolution(lostReclaims, transactions, engine, lossAccountOf(residualTarget))
+                ? new TerminalResolution(lostReclaims, transactions, engine, lossAccountOf(residualTarget))
                 : null;
         } else {
             this.keptTargetReclaims = null;

@@ -12,7 +12,7 @@ import { BookValueEngine } from "./equity-policy/book-value/engine.js";
 import { unwind } from "./equity-policy/recaptures.js";
 import { ScenarioLedger } from "./scenarios.js";
 import { ExchangeResolution } from "./equity-policy/exchange.js";
-import { ExpenseResolution } from "./equity-policy/expense.js";
+import { TerminalResolution } from "./equity-policy/terminal.js";
 
 runCLI({
     ledger: ScenarioLedger.ledger,
@@ -31,7 +31,7 @@ runCLI({
     Exchange,
     BookValueEngine,
     ExchangeResolution,
-    ExpenseResolution,
+    TerminalResolution,
     scale,
     unscale,
     unwind

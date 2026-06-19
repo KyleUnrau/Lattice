@@ -107,7 +107,7 @@ export class ExchangeAccount extends ComputedAccount implements ExchangeAccountM
  * edge*: a {@link ResidualUTXI} carrying its origin-position residual-basis, recognized at its
  * surface and able to later carry back toward its origin. Unlike the scan-based
  * {@link ExchangeAccount}, this account owns its residual lots directly — each is registered via
- * {@link addResidualInput}, called by {@link ExchangeResolution} and {@link ExpenseResolution}.
+ * {@link addResidualInput}, called by {@link ExchangeResolution} and {@link TerminalResolution}.
  * Multiple ResidualAccounts (e.g. "Capital Gains", "FX Gains") can coexist without crosstalk.
  *
  * Losses are **not** held here — they are terminal and settle into a {@link TerminalAccount} at

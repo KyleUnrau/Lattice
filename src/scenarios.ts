@@ -1,6 +1,6 @@
 import { BookValueEngine } from "./equity-policy/book-value/engine.js";
 import { ExchangeResolution } from "./equity-policy/exchange.js";
-import { ExpenseResolution } from "./equity-policy/expense.js";
+import { TerminalResolution } from "./equity-policy/terminal.js";
 import type { Account } from "./ledger-kernel/accounts/account.js";
 import type { ExchangeAccount, ResidualAccount, TerminalAccount } from "./ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
@@ -126,7 +126,7 @@ export namespace ScenarioLedger {
             const event = ledger.beginEvent();
 
             const expensedInputs = event.context.generateInputs(accounts.cash, positions.a, 50);
-            const expense = new ExpenseResolution(expensedInputs, event.view(), engine, accounts.exchangeExpense);
+            const expense = new TerminalResolution(expensedInputs, event.view(), engine, accounts.exchangeExpense);
             event.record(expense.constructTransactions().toGroup());
 
             const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 1000);

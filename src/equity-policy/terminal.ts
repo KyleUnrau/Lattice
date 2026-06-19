@@ -1,46 +1,44 @@
-import type { BookValueEngine } from "./book-value/engine.js";
-import { assertPositionUnifiromity, type Position } from "../ledger-kernel/positions.js";
-import { sumNodeQuantityScaled, Transaction } from "../ledger-kernel/transactions.js";
-import { TransactionGroup } from "../ledger-kernel/transactions.js";
-import { ResidualUTXI } from "../ledger-kernel/transactions/cross-position.js";
-import { ResidualAccount } from "../ledger-kernel/accounts/computed.js";
+import type { TerminalAccount, ResidualAccount } from "../ledger-kernel/accounts/computed.js";
+import { type Position, assertPositionUnifiromity } from "../ledger-kernel/positions.js";
+import { Transaction, TransactionGroup, sumNodeQuantityScaled } from "../ledger-kernel/transactions.js";
+import type { ResidualUTXI } from "../ledger-kernel/transactions/cross-position.js";
 import type { Input } from "../ledger-kernel/transactions/inputs.js";
 import type { Output } from "../ledger-kernel/transactions/outputs.js";
-import { unwind, executeRecaptures, classifyRecaptures } from "./recaptures.js";
-import type { HopTransaction, Recapture, RecaptureClassification, UnwindPlan } from "./recaptures.js";
-import type { TerminalAccount } from "../ledger-kernel/accounts/computed.js";
+import type { BookValueEngine } from "./book-value/engine.js";
+import { type Recapture, type HopTransaction, unwind, classifyRecaptures, executeRecaptures, type RecaptureClassification, type UnwindPlan } from "./recaptures.js";
 
-/** A residual settled by being expensed: its inherited origin-position basis is re-recognized as a capital gain. */
-export type ExpenseResidualRecognition = {
+
+/** A residual settled by being terminated: its inherited origin-position basis is re-recognized as a capital gain. */
+export type TerminalResidualRecognition = {
     position: Position;
     quantity: bigint;
-    /** The capital-gain lot recognized for this settled residual; pairs against an expense output. */
+    /** The capital-gain lot recognized for this settled residual; pairs against a terminal output. */
     gainLot: ResidualUTXI;
 };
 
-/** A terminal **origin** position recovered by the full unwind: its recaptured basis is expensed there. */
-export type ExpenseRecapturedGroup = {
+/** A terminal **origin** position recovered by the full unwind: its recaptured basis is terminated there. */
+export type TerminalRecapturedGroup = {
     position: Position;
     recaptures: Recapture[];
     totalQuantity: bigint;
 };
 
-export class ExpenseTransactions {
+export class TerminalTransactions {
     constructor(
         public readonly from: Transaction,
         public readonly intermediates: TransactionGroup,
-        public readonly externalExpenses: TransactionGroup,
-        public readonly resolution: ExpenseResolution
-    ) {}
+        public readonly externalTerminals: TransactionGroup,
+        public readonly resolution: TerminalResolution
+    ) { }
 
     /**
-     * The role-annotated {@link TransactionGroup} for this expense. Member order matches
+     * The role-annotated {@link TransactionGroup} for this terminal event. Member order matches
      * {@link flatten} exactly, so committing the group reproduces the same history.
      */
     public toGroup(): TransactionGroup {
         const members: (Transaction | TransactionGroup)[] = [this.from];
         if (this.intermediates.members.length !== 0) members.push(this.intermediates);
-        if (this.externalExpenses.members.length !== 0) members.push(this.externalExpenses);
+        if (this.externalTerminals.members.length !== 0) members.push(this.externalTerminals);
         return new TransactionGroup(members);
     }
 
@@ -48,47 +46,47 @@ export class ExpenseTransactions {
         return this.toGroup().flatten();
     }
 }
-
 /**
- * Records an expense across the **full provenance** of the consumed inputs, *without* committing any
- * transaction — the caller owns assembly. Mirrors {@link ExchangeResolution}: pass the consumed
- * `inputs`, the engine, the transaction history, and the `account` the expense is recognized in;
+ * Records a terminal settlement across the **full provenance** of the consumed inputs, *without*
+ * committing any transaction — the caller owns assembly. Mirrors {@link ExchangeResolution}: pass the
+ * consumed `inputs`, the engine, the transaction history, and the `account` the value is recognized in;
  * the constructor unwinds the lineage and precomputes every kernel line, which the caller assembles
  * via {@link getFromOutputs} / {@link constructFromTransaction} (the consuming transaction),
  * {@link constructIntermediateTransactions} (the per-position hops of a multi-hop unwind), and
- * {@link constructExpenseTransactions} (the per-origin recognition transactions).
+ * {@link constructTerminalTransactions} (the per-origin recognition transactions).
  *
- * Because an expense consumes the value entirely, the whole exchange lineage is unwound to its
- * origins ({@link unwind} in full mode): every edge is recaptured at its locked rate, intermediate
- * positions net to zero through hop transactions, and the recovered value is recognized as an
- * expense in the **terminal origin** position(s) it ultimately came from ({@link recaptureGroups}).
- * Surface-position value with no lineage is expensed directly in the consuming transaction
- * ({@link originAmounts}). Residual-derived value has its leg closed ({@link residualCloseOutputs})
- * and its deferred origin-basis equity re-recognized — within the same {@link ResidualAccount} that
- * originally minted the residual (read off `node.residual.account`), not the expense account — then
- * expensed there ({@link residualRecognitions}).
+ * Because a terminal settlement consumes the value entirely, the whole exchange lineage is unwound to
+ * its origins ({@link unwind} in full mode): every edge is recaptured at its locked rate, intermediate
+ * positions net to zero through hop transactions, and the recovered value is recognized in the
+ * **terminal origin** position(s) it ultimately came from ({@link recaptureGroups}). Surface-position
+ * value with no lineage is recognized directly in the consuming transaction ({@link originAmounts}).
+ * Residual-derived value has its leg closed ({@link residualCloseOutputs}) and its deferred
+ * origin-basis equity re-recognized — within the same {@link ResidualAccount} that originally minted
+ * the residual (read off `node.residual.account`), not the terminal account — then recognized there
+ * ({@link residualRecognitions}).
  *
  * Commit order: the consuming transaction first, then the hops (so the origin amounts they thread
- * are available), then the expense recognitions.
+ * are available), then the terminal recognitions.
  */
-export class ExpenseResolution {
-    /** One group per terminal-origin position recovered by the unwind; each drives one expense transaction. */
-    public readonly recaptureGroups: ExpenseRecapturedGroup[];
-    /** Surface-position portions with no exchange lineage; expensed directly in the consuming transaction. */
-    public readonly originAmounts: { position: Position; quantity: bigint }[];
-    /** Per-origin-position capital-gain recognitions for settled residual-derived value; each pairs with an expense output. */
-    public readonly residualRecognitions: ExpenseResidualRecognition[];
-    /** Surface-position settlements closing the residual legs of expensed residual-derived value. */
+
+export class TerminalResolution {
+    /** One group per terminal-origin position recovered by the unwind; each drives one recognition transaction. */
+    public readonly recaptureGroups: TerminalRecapturedGroup[];
+    /** Surface-position portions with no exchange lineage; recognized directly in the consuming transaction. */
+    public readonly originAmounts: { position: Position; quantity: bigint; }[];
+    /** Per-origin-position capital-gain recognitions for settled residual-derived value; each pairs with a terminal output. */
+    public readonly residualRecognitions: TerminalResidualRecognition[];
+    /** Surface-position settlements closing the residual legs of terminated residual-derived value. */
     public readonly residualCloseOutputs: Output[];
 
     /** Surface-position recapture settlements (outermost edges' to-sides) — belong in the consuming transaction. */
     private readonly surfaceSettlements: Output[];
     /** Intermediate positions crossed by a multi-hop unwind; each transaction nets to zero. */
     private readonly hops: HopTransaction[];
-    /** Direct expense debits for the no-lineage {@link originAmounts}, in the surface position. */
-    private readonly directExpenseOutputs: Output[];
-    /** Recognition entries: each reclaimed origin amount / settled-residual gain paired with its expense debit. */
-    private readonly expenseEntries: { inputs: Input[]; outputs: Output[] }[];
+    /** Direct terminal debits for the no-lineage {@link originAmounts}, in the surface position. */
+    private readonly directTerminalOutputs: Output[];
+    /** Recognition entries: each reclaimed origin amount / settled-residual gain paired with its terminal debit. */
+    private readonly terminalEntries: { inputs: Input[]; outputs: Output[]; }[];
 
     private readonly fromPosition: Position;
 
@@ -116,13 +114,13 @@ export class ExpenseResolution {
 
         this.originAmounts = this.computeOriginAmounts(totalConsumed, classification.surfaceSettled, closeOutputs);
 
-        this.directExpenseOutputs = this.generateDirectExpenseOutputs();
-        this.expenseEntries = this.buildExpenseEntries();
+        this.directTerminalOutputs = this.generateDirectTerminalOutputs();
+        this.terminalEntries = this.buildTerminalEntries();
     }
 
-    // Each terminal reclaim is an origin position whose recovered basis is expensed; sum the
-    // group's reclaimed quantities to size that position's expense.
-    private groupTerminalReclaims(classification: RecaptureClassification): ExpenseRecapturedGroup[] {
+    // Each terminal reclaim is an origin position whose recovered basis is recognized; sum the
+    // group's reclaimed quantities to size that position's recognition.
+    private groupTerminalReclaims(classification: RecaptureClassification): TerminalRecapturedGroup[] {
         return [...classification.terminalReclaims].map(([position, recaptures]) => ({
             position,
             recaptures,
@@ -134,7 +132,7 @@ export class ExpenseResolution {
     // origin-basis equity in the origin position. The recognition is a position-shift within the
     // residual's *own* account (keyed off the lot, which carries its account), so value tracing
     // through residuals from different accounts never collapses into one.
-    private settleResiduals(plan: UnwindPlan): { closeOutputs: Output[]; recognitions: ExpenseResidualRecognition[] } {
+    private settleResiduals(plan: UnwindPlan): { closeOutputs: Output[]; recognitions: TerminalResidualRecognition[]; } {
         const closeOutputs: Output[] = [];
         const originTotals = new Map<ResidualAccount, Map<Position, bigint>>();
         for (const node of plan.residualNodes) {
@@ -145,7 +143,7 @@ export class ExpenseResolution {
                 byPosition.set(position, (byPosition.get(position) ?? 0n) + quantity);
         }
 
-        const recognitions: ExpenseResidualRecognition[] = [];
+        const recognitions: TerminalResidualRecognition[] = [];
         for (const [account, byPosition] of originTotals)
             for (const [position, quantity] of byPosition) {
                 const gainLot = account.addResidualInput(quantity, position, new Map<Position, bigint>([[position, quantity]]));
@@ -155,28 +153,28 @@ export class ExpenseResolution {
         return { closeOutputs, recognitions };
     }
 
-    // No-lineage surface value is expensed directly. Derive it as the remainder of the consumed
+    // No-lineage surface value is recognized directly. Derive it as the remainder of the consumed
     // amount after surface settlements and closed residual legs, so the consuming transaction
     // balances exactly.
     private computeOriginAmounts(
         totalConsumed: bigint,
         surfaceSettled: bigint,
         residualCloseOutputs: Output[]
-    ): { position: Position; quantity: bigint }[] {
+    ): { position: Position; quantity: bigint; }[] {
         const residualSurface = residualCloseOutputs.reduce((sum, o) => sum + o.quantity, 0n);
         const directSurface = totalConsumed - surfaceSettled - residualSurface;
         return directSurface > 0n ? [{ position: this.fromPosition, quantity: directSurface }] : [];
     }
 
-    // Surface-position expense debits for the no-lineage origin amounts (the consuming transaction's
-    // own expense recognition).
-    private generateDirectExpenseOutputs(): Output[] {
+    // Surface-position terminal debits for the no-lineage origin amounts (the consuming transaction's
+    // own terminal recognition).
+    private generateDirectTerminalOutputs(): Output[] {
         return this.originAmounts.map(o => this.account.recognize(o.quantity, o.position));
     }
 
-    // One recognition entry per terminal-origin reclaim (reclaimed origin amount → expense output)
-    // and one per settled-residual recognition (recognized capital-gain lot → expense output).
-    private buildExpenseEntries(): { inputs: Input[]; outputs: Output[] }[] {
+    // One recognition entry per terminal-origin reclaim (reclaimed origin amount → terminal output)
+    // and one per settled-residual recognition (recognized capital-gain lot → terminal output).
+    private buildTerminalEntries(): { inputs: Input[]; outputs: Output[]; }[] {
         return [
             ...this.recaptureGroups.map(group => ({
                 inputs: group.recaptures.map(r => r.reclaim),
@@ -191,15 +189,15 @@ export class ExpenseResolution {
 
     /**
      * Outputs for the consuming transaction (surface position): the surface-position recapture
-     * settlements, the direct expense debits for any no-lineage origin amounts, and the closed legs
+     * settlements, the direct terminal debits for any no-lineage origin amounts, and the closed legs
      * of any settled residuals — together balancing exactly against the consumed `inputs`.
      */
     public getFromOutputs(): Output[] {
-        return [...this.surfaceSettlements, ...this.directExpenseOutputs, ...this.residualCloseOutputs];
+        return [...this.surfaceSettlements, ...this.directTerminalOutputs, ...this.residualCloseOutputs];
     }
 
     /** The consuming transaction: the consumed `inputs` against {@link getFromOutputs}, plus any `additionalNodes`. */
-    public constructFromTransaction(additionalNodes?: { inputs: Input[]; outputs: Output[] }): Transaction {
+    public constructFromTransaction(additionalNodes?: { inputs: Input[]; outputs: Output[]; }): Transaction {
         return new Transaction(
             [...this.inputs, ...(additionalNodes?.inputs ?? [])],
             [...this.getFromOutputs(), ...(additionalNodes?.outputs ?? [])],
@@ -217,19 +215,19 @@ export class ExpenseResolution {
     }
 
     /**
-     * The expense-recognition transactions: one per terminal-origin recapture group (reclaimed
-     * origin amount → expense output in that position) and one per settled-residual recognition
-     * (recognized capital-gain lot → expense output). Commit these last.
+     * The terminal-recognition transactions: one per terminal-origin recapture group (reclaimed
+     * origin amount → terminal output in that position) and one per settled-residual recognition
+     * (recognized capital-gain lot → terminal output). Commit these last.
      */
-    public constructExpenseTransactions(): TransactionGroup {
-        return new TransactionGroup(this.expenseEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions)));
+    public constructTerminalTransactions(): TransactionGroup {
+        return new TransactionGroup(this.terminalEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions)));
     }
 
-    public constructTransactions(additionalNodes?: {inputs: Input[]; outputs: Output[]}): ExpenseTransactions {
-        return new ExpenseTransactions(
+    public constructTransactions(additionalNodes?: { inputs: Input[]; outputs: Output[]; }): TerminalTransactions {
+        return new TerminalTransactions(
             this.constructFromTransaction(additionalNodes),
             this.constructIntermediateTransactions(),
-            this.constructExpenseTransactions(),
+            this.constructTerminalTransactions(),
             this
         );
     }

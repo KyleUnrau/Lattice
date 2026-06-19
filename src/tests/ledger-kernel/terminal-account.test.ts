@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
 import { TerminalAccount } from "../../ledger-kernel/accounts/computed.js";
 import { Account } from "../../ledger-kernel/accounts/account.js";
-import { ExpenseResolution } from "../../equity-policy/expense.js";
+import { TerminalResolution } from "../../equity-policy/terminal.js";
 import { commitSwap, makeFixture, openInto } from "../utils/ledger-fixture.js";
 
 // A terminal settlement record must never become spendable inventory. These tests pin the
@@ -30,7 +30,7 @@ test("TERM3: an expensed terminal record is committed and counts toward balance,
     openInto(f, f.cash, f.cad, 1000);
 
     const inputs = f.cash.generateInputs(f.cad, 200, f.ledger.transactions);
-    const resolution = new ExpenseResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
+    const resolution = new TerminalResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
     const event = f.ledger.beginEvent();
     event.record(resolution.constructTransactions().toGroup());
     event.register();

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { makeFixture, openInto } from "../utils/ledger-fixture.js";
 import { Transaction, TransactionGroup } from "../../ledger-kernel/transactions.js";
 import { ExchangeResolution } from "../../equity-policy/exchange.js";
-import { ExpenseResolution } from "../../equity-policy/expense.js";
+import { TerminalResolution } from "../../equity-policy/terminal.js";
 
 test("EventBuilder.newTransaction commits a transaction and register() appends it as a top-level group", () => {
     const f = makeFixture();
@@ -56,7 +56,7 @@ test("beginEvent() nests sub-flows recorded before register() into one composite
     const event = f.ledger.beginEvent();
 
     const expensedInputs = f.cash.generateInputs(f.cad, 50, event.view());
-    const expense = new ExpenseResolution(expensedInputs, event.view(), f.engine, f.exchangeExpense);
+    const expense = new TerminalResolution(expensedInputs, event.view(), f.engine, f.exchangeExpense);
     const expenseGroup = expense.constructTransactions().toGroup();
     event.record(expenseGroup);
 

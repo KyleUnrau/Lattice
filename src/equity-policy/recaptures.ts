@@ -32,7 +32,7 @@ export interface UnwindPlan {
     residualCarryBacks: ResidualCarryBack[];
     /**
      * Full mode only (`stopAt === null`): every `ResidualPath` in the consumed lineage, settled to
-     * origin by {@link ExpenseResolution}. Empty in loop mode (use {@link residualCarryBacks}).
+     * origin by {@link TerminalResolution}. Empty in loop mode (use {@link residualCarryBacks}).
      */
     residualNodes: ResidualPath[];
 }
