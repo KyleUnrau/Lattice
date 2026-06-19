@@ -290,6 +290,89 @@ test("INV5c: carrying a gain residual back at a NON-unit rate re-recognizes it a
 });
 
 // ---------------------------------------------------------------------------
+// 5d. Coupled: a single exchange that BOTH carries a residual back AND closes an
+//     ordinary loop at a loss. The terminal-loss decomposition must not carve into
+//     (or distort) the carry-back surface — the two slices settle independently.
+// ---------------------------------------------------------------------------
+
+test("INV5d: carry-back + loop-loss in ONE exchange settle independently — the loss does not cannibalize the carry-back surface", () => {
+    const f = makeFixture();
+    openInto(f, f.wallet, f.btc, 0.02);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad);  // 1000 CAD, basis 0.01 BTC
+    commitSwap(f, f.cash, f.cad, 1000, f.cash, f.usd, 750, f.cadToUsd);     // 1000 CAD → 750 USD
+    commitSwap(f, f.cash, f.usd, 750, f.cash, f.cad, 1100, f.usdToCad);     // loop: 100 CAD gain, 0.001 BTC residual-basis
+
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -10000n, "100 CAD gain deferred in CAD");
+
+    // Cash holds a single 1100 CAD lot whose lineage is BOTH the recovered 1000 CAD of BTC-derived
+    // capital (basis 0.01 BTC) AND the 100 CAD residual (basis 0.001 BTC). Carry it ALL back into BTC
+    // at a DEPRECIATED rate (1100 CAD → 0.0099 BTC), so:
+    //   • the ordinary loop (1000 CAD ↔ 0.01 BTC basis) returns only 0.009 BTC ⇒ 0.001 BTC loss, and
+    //   • the carry-back (100 CAD residual, 0.001 BTC basis) returns 0.0009 BTC ⇒ 0.0001 BTC incremental loss.
+    const closing = commitSwap(f, f.cash, f.cad, 1100, f.wallet, f.btc, 0.0099, f.cadToBtc);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies for a coupled carry-back + loop-loss exchange");
+
+    // The loop lost, so there is NO loop gain residual; the carry-back leg is still closed exactly once.
+    assert.equal(closing.resolution.createdResiduals.length, 0, "the losing loop creates no gain residual");
+    assert.equal(closing.resolution.residualCloseOutputs.length, 1, "the carry-back residual leg is closed");
+    assert.notEqual(closing.resolution.terminalLoss, null, "the ordinary loop loss is terminal");
+
+    // CARRY-BACK closes correctly: the deferred CAD gain is fully reversed (the WHOLE 100 CAD residual
+    // carried back — the loss decomposition did not eat any of it).
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "deferred CAD gain fully reversed");
+
+    // The residual-basis is re-recognized at origin in FULL: 0.001 BTC gain (not a shrunken slice).
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.btc, f.ledger.transactions), -100000n, "full 0.001 BTC residual-basis re-recognized at BTC origin");
+
+    // Terminal losses at origin = ordinary loop loss (0.001 BTC) + carry-back incremental (0.0001 BTC).
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.btc, f.ledger.transactions), 110000n, "0.0011 BTC total terminal loss at BTC origin");
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "nothing terminalized in destination CAD");
+
+    // Economic truth: 0.01 BTC invested, 0.0099 BTC returned; wallet = 0.01 untouched + 0.0099.
+    assert.equal(f.wallet.getBalance(f.btc, f.ledger.transactions), 0.0199);
+    assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 0);
+});
+
+// ---------------------------------------------------------------------------
+// 5e. Nested carry-back: a residual created at surface B (origin A) whose value
+//     moved forward B→C must still carry back when C later returns to origin A.
+// ---------------------------------------------------------------------------
+
+test("INV5e: a residual that moved forward (CAD→USD) still carries back to its BTC origin when USD later returns to BTC", () => {
+    const f = makeFixture();
+    openInto(f, f.wallet, f.btc, 0.02);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad);  // CAD now BTC-derived
+    commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 375, f.cadToUsd);
+    commitSwap(f, f.cash, f.usd, 375, f.cash, f.cad, 550, f.usdToCad);      // 50 CAD residual gain, origin BTC
+
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "50 CAD gain deferred at surface B (CAD)");
+
+    // Move the residual-derived CAD FORWARD into USD (non-matching target — the residual stays
+    // anchored to BTC behind a forward CAD→USD edge; the deferred gain does not leak into USD).
+    commitSwap(f, f.cash, f.cad, 1050, f.cash, f.usd, 840, f.cadToUsd);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "deferred gain untouched after the forward move");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "no gain leaked into USD");
+
+    // Now USD returns to BTC (C→A): the nested residual behind the CAD→USD edge must be discovered
+    // and carried back to its BTC origin, closing its leg through the CAD hop.
+    const back = commitSwap(f, f.cash, f.usd, 840, f.wallet, f.btc, 0.0105, f.usdToBtc);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after a nested carry-back");
+
+    // The residual is resolved at its true origin: the deferred CAD gain reverses to 0 and surfaces
+    // as 0.0005 BTC, re-anchored to BTC and not to the intermediate USD/CAD positions.
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), 0n, "deferred CAD gain reversed by the nested carry-back");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "no residual re-anchored to the intermediate USD position");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.btc, f.ledger.transactions), -50000n, "gain realized as 0.0005 BTC at the BTC origin");
+
+    // Economic truth: 0.01 BTC round-tripped to 0.0105 BTC; wallet = 0.01 untouched + 0.0105.
+    assert.equal(f.wallet.getBalance(f.btc, f.ledger.transactions), 0.0205);
+    assert.equal(f.cash.getBalance(f.usd, f.ledger.transactions), 0);
+    assert.equal(f.cash.getBalance(f.cad, f.ledger.transactions), 0);
+});
+
+// ---------------------------------------------------------------------------
 // 6. Mixed-origin balances remain distinguishable (deterministic FIFO selection).
 // ---------------------------------------------------------------------------
 

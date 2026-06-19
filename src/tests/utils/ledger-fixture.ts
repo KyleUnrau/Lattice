@@ -35,6 +35,7 @@ export interface Fixture {
     btcToCad: ExchangeAccount;
     usdToCad: ExchangeAccount;
     cadToBtc: ExchangeAccount;
+    usdToBtc: ExchangeAccount;
 }
 
 export function makeFixture(): Fixture {
@@ -70,8 +71,9 @@ export function makeFixture(): Fixture {
     const btcToCad = equity.addExchangeAccount("Transfers BTC→CAD", Orientation.Positive);
     const usdToCad = equity.addExchangeAccount("Transfers USD→CAD", Orientation.Positive);
     const cadToBtc = equity.addExchangeAccount("Transfers CAD→BTC", Orientation.Positive);
+    const usdToBtc = equity.addExchangeAccount("Transfers USD→BTC", Orientation.Positive);
 
-    return { cad, usd, oranges, btc, ledger, engine, cash, inventory, wallet, drawings, openingBalance, exchangeExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad, btcToCad, usdToCad, cadToBtc };
+    return { cad, usd, oranges, btc, ledger, engine, cash, inventory, wallet, drawings, openingBalance, exchangeExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad, btcToCad, usdToCad, cadToBtc, usdToBtc };
 }
 
 /** Commits an opening-balance credit of `value` units of `position` into `cash`. */

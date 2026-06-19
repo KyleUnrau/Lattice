@@ -90,9 +90,13 @@ export class ExchangeTransactions {
  * **Gains and losses are asymmetric.** A recovered loop whose proceeds *exceed* the recovered cost
  * basis recognizes the surplus as a {@link ResidualUTXI} gain in the target (a directional suspended
  * residual edge that can later carry back). A loop whose proceeds *fall short* is a **loss** —
- * unrecovered origin basis, which is *terminal*: the lost portion of the consumed surface is
- * expensed to its cost-basis origin through an internal {@link ExpenseResolution} into the loss
- * {@link TerminalAccount}, never minted as a movable destination lot.
+ * unrecovered origin basis, which is *terminal*. The loss is resolved on the *target* side, not by
+ * carving the consumed surface: the loop's **role-pure** target reclaims are split into the
+ * proceeds-backing portion (which settles into the target) and the unrecovered shortfall, and the
+ * shortfall is full-unwound to its cost-basis origin through an internal {@link ExpenseResolution}
+ * into the loss {@link TerminalAccount} — never minted as a movable destination lot. Resolving the
+ * loss on the reclaims (rather than the surface) keeps any carry-back/forward surface intact even
+ * when a single consumed lot blends loop capital with residual-derived value.
  */
 export class ExchangeResolution {
     /** Forward exchange at the actual proceeds rate; null when all consumed value looped or was residual-derived. */
@@ -109,8 +113,12 @@ export class ExchangeResolution {
 
     private readonly recaptureResolution: ExchangeRecaptureResolution;
 
-    /** The kept (proceeds-backing) portion of `fromInputs`; equals `fromInputs` unless a loss was carved off. */
-    private readonly effectiveFromInputs: Input[];
+    /**
+     * For a losing loop: the kept (proceeds-backing) `Pl` portion of the target-position loop
+     * reclaims that settles into the proceeds; the lost `B − Pl` portion is diverted to
+     * {@link terminalLoss}. `null` on a gain (the full reclaims settle into the proceeds).
+     */
+    private readonly keptTargetReclaims: Input[] | null;
 
     private readonly fromPosition: Position;
     private readonly toPosition: Position;
@@ -126,29 +134,31 @@ export class ExchangeResolution {
         this.fromPosition = assertPositionUnifiromity({inputs: fromInputs});
         this.toPosition = assertPositionUnifiromity({outputs: toOutputs});
 
-        // First pass on the full draw to detect a net loss on the recovered loop.
-        const preliminary = this.computeRecaptureResolution(fromInputs, this.toPosition, engine);
+        // One pass over the whole draw. The surface is never carved: the consuming transaction
+        // settles all of it (loop settlements + carry-back closes + forward), and a loss is resolved
+        // on the *target* side instead (see below). This keeps the carry-back and forward surface
+        // slices intact even when a single consumed lot blends loop capital with residual-derived
+        // value — a blended lot cannot be sliced into role-pure surface (tracing is proportional).
+        this.recaptureResolution = this.computeRecaptureResolution(fromInputs, this.toPosition, engine);
 
-        if (preliminary.residualQuantity < 0n) {
-            // A loss is unrecovered origin basis — it is terminal, not a movable destination lot.
-            // Carve the consumed surface into the proceeds-backing (kept) portion and the lost
-            // portion, expense the lost portion to its cost-basis origin (a full unwind into the
-            // loss TerminalAccount), and resolve the kept portion as a clean, zero-residual loop.
-            const loss = -preliminary.residualQuantity;
-            const fromQuantity = sumNodeQuantityScaled(fromInputs);
-            const outputQuantity = sumNodeQuantityScaled(toOutputs);
-            const lostSurface = outputQuantity + loss > 0n ? fromQuantity * loss / (outputQuantity + loss) : 0n;
-
-            const [lostInputs, keptInputs] = splitInputs(fromInputs, lostSurface);
-            this.terminalLoss = lostInputs.length > 0
-                ? new ExpenseResolution(lostInputs, transactions, engine, lossAccountOf(residualTarget))
+        if (this.recaptureResolution.residualQuantity < 0n) {
+            // A loss is unrecovered loop capital basis — terminal at the loop's deepest origin, never
+            // a movable destination lot. The loop reclaimed `B` (totalCostBasis) into the target, but
+            // the proceeds only back `Pl = B − loss`. So split the **role-pure** target reclaims (the
+            // loop principal; carry-back/forward never appear here): settle `Pl` into the proceeds and
+            // full-unwind the lost `B − Pl` slice to origin (a terminal loss into the loss account).
+            const loss = -this.recaptureResolution.residualQuantity;
+            const targetReclaims = this.recaptureResolution.recaptures
+                .filter(r => r.reclaim.source.position === this.toPosition)
+                .map(r => r.reclaim);
+            const [lostReclaims, keptReclaims] = splitInputs(targetReclaims, loss);
+            this.keptTargetReclaims = keptReclaims;
+            this.terminalLoss = lostReclaims.length > 0
+                ? new ExpenseResolution(lostReclaims, transactions, engine, lossAccountOf(residualTarget))
                 : null;
-            this.effectiveFromInputs = keptInputs;
-            this.recaptureResolution = this.computeRecaptureResolution(keptInputs, this.toPosition, engine);
         } else {
+            this.keptTargetReclaims = null;
             this.terminalLoss = null;
-            this.effectiveFromInputs = fromInputs;
-            this.recaptureResolution = preliminary;
         }
 
         this.exchange = this.forwardExchange(
@@ -338,8 +348,12 @@ export class ExchangeResolution {
 
     /** Inputs for the receiving/target transaction: target-position recapture reclaims, forward to-side, the gain residual, and carry-back re-recognitions. */
     public getToInputs(): Input[] {
+        // On a loss only the proceeds-backing `Pl` slice of the loop reclaims settles here; the lost
+        // slice was diverted to {@link terminalLoss}. On a gain the full reclaims settle.
+        const targetReclaims = this.keptTargetReclaims
+            ?? this.recaptureResolution.recaptures.filter(r => r.reclaim.source.position === this.toPosition).map(r => r.reclaim);
         return [
-            ...this.recaptureResolution.recaptures.filter(r => r.reclaim.source.position === this.toPosition).map(r => r.reclaim),
+            ...targetReclaims,
             ...(this.exchange ? [this.exchange.to] : []),
             ...this.createdResiduals,
             ...this.settledResiduals.mintedInputs,
@@ -351,17 +365,17 @@ export class ExchangeResolution {
         return [...this.toOutputs, ...this.settledResiduals.terminalLossOutputs];
     }
 
-    /** The consuming/surface transaction: the kept `fromInputs` against {@link getFromOutputs}, plus any `additionalNodes`. */
+    /** The consuming/surface transaction: the whole `fromInputs` against {@link getFromOutputs}, plus any `additionalNodes`. */
     public constructFromTransaction(
         additionalNodes?: {inputs: Input[], outputs: Output[]}
     ): Transaction {
         if (additionalNodes) return new Transaction(
-            [...this.effectiveFromInputs, ...additionalNodes.inputs],
+            [...this.fromInputs, ...additionalNodes.inputs],
             [...this.getFromOutputs(), ...additionalNodes.outputs],
             this.transactions
         );
 
-        return new Transaction(this.effectiveFromInputs, this.getFromOutputs(), this.transactions);
+        return new Transaction(this.fromInputs, this.getFromOutputs(), this.transactions);
     }
 
     /** The receiving/target transaction: {@link getToInputs} against {@link getToOutputs}, plus any `additionalNodes`. */
