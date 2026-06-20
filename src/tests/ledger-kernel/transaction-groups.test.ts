@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeFixture, openInto } from "../utils/ledger-fixture.js";
+import { makeFixture, openInto, commitSwap } from "../utils/ledger-fixture.js";
 import { Transaction, TransactionGroup } from "../../ledger-kernel/transactions.js";
 import { ExchangeResolution } from "../../equity-policy/exchange.js";
 import { TerminalResolution } from "../../equity-policy/terminal.js";
@@ -27,7 +27,7 @@ test("EventBuilder.newTransaction commits a transaction and register() appends i
     assert.ok(f.ledger.verify().ok);
 });
 
-test("ExchangeTransactions.toGroup() flattens in from → to → intermediates order, matching flatten()", () => {
+test("ExchangeTransactions.toGroup() drops empty role-groups: a pure forward exchange yields [from, to]", () => {
     const f = makeFixture();
     openInto(f, f.cash, f.cad, 1000);
 
@@ -39,8 +39,48 @@ test("ExchangeTransactions.toGroup() flattens in from → to → intermediates o
     );
     const exchangeTxs = resolution.constructTransactions();
 
+    // A pure forward exchange threads no intermediate hops and recognizes no terminal loss, so both
+    // role-groups are empty and toGroup() omits them rather than preserving empty noise members.
+    assert.equal(exchangeTxs.intermediates.members.length, 0, "no intermediate hops on a pure forward exchange");
+    assert.equal(exchangeTxs.terminalLoss.members.length, 0, "no terminal loss on a pure forward exchange");
+
     const group = exchangeTxs.toGroup();
-    assert.deepEqual(group.members, [exchangeTxs.from, exchangeTxs.to, exchangeTxs.intermediates]);
+    assert.deepEqual(group.members, [exchangeTxs.from, exchangeTxs.to], "empty intermediates/terminalLoss are dropped");
+    assert.deepEqual(group.flatten(), exchangeTxs.flatten(), "toGroup().flatten() matches the wrapper's own flatten()");
+
+    const event = f.ledger.beginEvent();
+    event.record(group);
+    event.register();
+    assert.ok(f.ledger.verify().ok);
+});
+
+test("ExchangeTransactions.toGroup() orders members from → to → intermediates when a hop is present", () => {
+    const f = makeFixture();
+    openInto(f, f.cash, f.cad, 1000);
+    // Build a CAD→USD→Oranges loop so closing it back to CAD threads one USD intermediate hop.
+    commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 375, f.cadToUsd);
+    commitSwap(f, f.cash, f.usd, 375, f.inventory, f.oranges, 1500, f.usdToOranges);
+
+    // Close Oranges→CAD at a gain (600 CAD vs 500 basis) WITHOUT committing, so the wrapper can be
+    // inspected. The gain keeps terminalLoss empty, leaving members exactly [from, to, intermediates].
+    const fromInputs = f.inventory.generateInputs(f.oranges, 1500, f.ledger.transactions);
+    const toOutputs = f.cash.generateOutputs(f.cad, 600, f.ledger.transactions);
+    const resolution = new ExchangeResolution(
+        fromInputs, toOutputs, f.ledger.transactions,
+        f.engine, { gain: f.capitalGains, loss: f.capitalLosses }, f.orangesToCad
+    );
+    const exchangeTxs = resolution.constructTransactions();
+
+    // The multi-hop unwind threads a real USD intermediate hop, so intermediates is non-empty here.
+    assert.notEqual(exchangeTxs.intermediates.members.length, 0, "the loop close threads a real intermediate hop");
+    assert.equal(exchangeTxs.terminalLoss.members.length, 0, "closing at a gain produces no terminal loss");
+
+    const group = exchangeTxs.toGroup();
+    assert.deepEqual(
+        group.members,
+        [exchangeTxs.from, exchangeTxs.to, exchangeTxs.intermediates],
+        "members mirror from → to → intermediates in commit order"
+    );
     assert.deepEqual(group.flatten(), exchangeTxs.flatten(), "toGroup().flatten() matches the wrapper's own flatten()");
 
     const event = f.ledger.beginEvent();
