@@ -2,13 +2,13 @@ import type { BookValueEngine } from "./book-value/engine.js";
 import { assertPositionUnifiromity, type Position } from "../ledger-kernel/positions.js";
 import { splitInputs, sumNodeQuantityScaled, Transaction } from "../ledger-kernel/transactions.js";
 import { TransactionGroup } from "../ledger-kernel/transactions.js";
-import { Exchange, ResidualUTXI } from "../ledger-kernel/transactions/cross-position.js";
+import { Exchange, ResidualUTXI, type ExchangeTarget } from "../ledger-kernel/transactions/cross-position.js";
 import { type Input } from "../ledger-kernel/transactions/inputs.js";
 import { type Output } from "../ledger-kernel/transactions/outputs.js";
 import { classifyRecaptures, executeRecaptures, unwind, type Recapture } from "./recaptures.js";
-import { ExchangeAccount, gainAccountOf, lossAccountOf, type ResidualTarget } from "../ledger-kernel/accounts/computed.js";
+import { gainAccountOf, lossAccountOf, type ResidualTarget } from "../ledger-kernel/accounts/computed.js";
 import { type HopTransaction } from "./recaptures.js";
-import { collectOriginLeaves, type ResidualCarryBack } from "./book-value/lineage.js";
+import { collectOriginLeaves, forwardSurfaceQuantity, type ResidualCarryBack } from "./book-value/lineage.js";
 import { TerminalResolution } from "./terminal.js";
 
 interface ResidualSettlement {
@@ -50,6 +50,17 @@ export type ExchangeRecaptureResolution = {
     residualCarryBacks: ResidualCarryBack[];
     /** The target-position proceeds attributable to {@link residualCarryBacks}. */
     residualDerivedProceeds: bigint;
+    /**
+     * A surface-position settlement that mops up the rounding remainder left un-settled by the
+     * loop/carry-back to-side truncation — the part of the draw in excess of the genuine-forward
+     * surface ({@link forwardSurfaceQuantity}). It settles a sliver of an already-recaptured surface
+     * to-side at no extra basis, so the loop closes exactly and the sliver's proceeds fall into the
+     * recognized gain instead of stranding behind a forward edge nothing will close. Present whenever
+     * `remainder > genuineForwardSurface` (including the all-loops case where the genuine forward is
+     * zero); `null` when the remainder is entirely genuine forward (handled by
+     * {@link forwardExchangeToQuantity}).
+     */
+    surfaceRemainderSettlement: Output | null;
 };
 
 export class ExchangeTransactions {
@@ -76,6 +87,8 @@ export class ExchangeTransactions {
         return this.toGroup().flatten();
     }
 }
+
+export type { ExchangeTarget };
 
 /**
  * The exchange-resolution layer: resolves **the portion of consumed value that is actually being
@@ -133,7 +146,7 @@ export class ExchangeResolution {
         private readonly transactions: Transaction[],
         engine: BookValueEngine,
         residualTarget: ResidualTarget,
-        exchangeAccount: ExchangeAccount
+        exchangeAccount: ExchangeTarget
     ) {
         this.fromPosition = assertPositionUnifiromity({inputs: fromInputs});
         this.toPosition = assertPositionUnifiromity({outputs: toOutputs});
@@ -195,12 +208,12 @@ export class ExchangeResolution {
         toPosition: Position,
         engine: BookValueEngine
     ): ExchangeRecaptureResolution {
-
         const surfacePosition = assertPositionUnifiromity(fromInputs);
         const fromQuantity = sumNodeQuantityScaled(fromInputs);
         const outputQuantity = sumNodeQuantityScaled(this.toOutputs);
 
-        const plan = unwind(engine.compute(fromInputs), toPosition);
+        const basis = engine.compute(fromInputs);
+        const plan = unwind(basis, toPosition);
 
         // Execute one recapture per distinct exchange on the recovered loop path(s).
         const recaptures = executeRecaptures(plan, this.transactions);
@@ -228,8 +241,44 @@ export class ExchangeResolution {
         const residualDerivedProceeds = fromQuantity > 0n ? outputQuantity * carryBackSurfaceTotal / fromQuantity : 0n;
 
         // The forward portion is whatever surface value neither looped nor carried a residual back.
-        // Deriving it from the actually-settled surface amount keeps the consuming transaction exact.
-        const forwardExchangeToQuantity = fromQuantity - surfaceSettled - carryBackSurfaceTotal;
+        // The settled amounts (surfaceSettled, carryBackSurfaceTotal) are each rounded *down* as their
+        // to-sides are threaded, so the leftover blends genuine-forward value with that truncation.
+        // `forwardSurfaceQuantity` measures the genuine-forward surface straight from the basis tree.
+        // When it is zero, the whole draw provably loops/carries back, so the leftover is pure rounding:
+        // settle that sliver against an already-recaptured surface to-side (closing the loop exactly, at
+        // no extra basis) and let its proceeds fall into the recognized gain — never open a forward edge
+        // that nothing will close. When genuine forward exists, the leftover is a real forward as before.
+        const remainder = fromQuantity - surfaceSettled - carryBackSurfaceTotal;
+        const genuineForwardSurface = forwardSurfaceQuantity(basis, toPosition);
+
+        // `remainder` blends two things: the genuine-forward surface (which legitimately opens a
+        // forward edge carrying provenance onward) and the rounding truncation left behind as the
+        // loop/carry-back to-sides are threaded (each rounded *down*). Split them: only the genuine
+        // forward portion — capped at the remainder — opens a forward edge; the leftover is pure
+        // rounding. `forwardSurfaceQuantity` reads straight from the basis tree, so it is the
+        // truncation-free measure of the forward portion; `remainder >= genuineForwardSurface` always
+        // holds (the settled surfaces are rounded down), so the `min` only guards arithmetic surprises.
+        const forwardExchangeToQuantity = genuineForwardSurface < remainder ? genuineForwardSurface : remainder;
+        const roundingRemainder = remainder - forwardExchangeToQuantity;
+        if (remainder < 0n || forwardExchangeToQuantity < 0n || roundingRemainder < 0n)
+            throw new Error(`exchange remainder split is negative (remainder=${remainder}, forward=${forwardExchangeToQuantity}, rounding=${roundingRemainder}): settled surface exceeds the draw`);
+
+        // The rounding sliver provably loops/carries back (it is the part of the draw with no genuine
+        // forward provenance), so settle it against an already-recaptured surface to-side at no extra
+        // basis — closing the loop exactly and letting its proceeds fall into the recognized gain,
+        // instead of stranding it behind a forward edge nothing will ever close. Pick a surface to-side
+        // that can still absorb it *on top of* its own recapture settlement (the to-sides were rounded
+        // down, so at least one carries the leftover); availability here excludes the not-yet-committed
+        // recapture settlement, hence the `settlement.quantity + roundingRemainder` headroom check.
+        let surfaceRemainderSettlement: Output | null = null;
+        if (roundingRemainder > 0n) {
+            const surfaceRecapture = recaptures.find(r =>
+                r.settlement.source.position === surfacePosition
+                && r.settlement.source.calculateAvailable(this.transactions) >= r.settlement.quantity + roundingRemainder);
+            if (!surfaceRecapture)
+                throw new Error(`no surface to-side can absorb the ${roundingRemainder}-unit rounding remainder at ${surfacePosition.name}`);
+            surfaceRemainderSettlement = surfaceRecapture.settlement.source.consume(roundingRemainder, this.transactions);
+        }
         const forwardExchangeFromQuantity = forwardExchangeToQuantity > 0n && fromQuantity > 0n
             ? outputQuantity * forwardExchangeToQuantity / fromQuantity
             : 0n;
@@ -263,6 +312,7 @@ export class ExchangeResolution {
             residualOriginBasis,
             residualCarryBacks,
             residualDerivedProceeds,
+            surfaceRemainderSettlement,
         };
     }
 
@@ -275,7 +325,7 @@ export class ExchangeResolution {
         fromPosition: Position,
         toPosition: Position,
         recaptureResolution: ExchangeRecaptureResolution,
-        exchangeAccount: ExchangeAccount
+        exchangeAccount: ExchangeTarget
     ): Exchange | null {
         if (recaptureResolution.forwardExchangeToQuantity <= 0n) return null;
         return new Exchange(
@@ -293,9 +343,38 @@ export class ExchangeResolution {
         recaptureResolution: ExchangeRecaptureResolution,
         target: ResidualTarget
     ): ResidualUTXI[] {
-        if (recaptureResolution.residualQuantity > 0n)
+        if (recaptureResolution.residualQuantity > 0n) {
+            if (process.env.LATTICE_DEBUG) this.traceMintBlend(toPosition, recaptureResolution);
             return [gainAccountOf(target).addResidualInput(recaptureResolution.residualQuantity, toPosition, recaptureResolution.residualOriginBasis)];
+        }
         return [];
+    }
+
+    /**
+     * DEBUG: shows why a gain residual minted in `toPosition` will shadow a still-open upstream edge.
+     * A gain whose deep origin differs from its surface (`originBasis` has a position ≠ toPosition) is
+     * deposited into the surface position alongside live upstream-edge value; the basis engine blends
+     * the two, so later draws split between the (terminal) residual node and the live edge.
+     */
+    private traceMintBlend(toPosition: Position, rr: ExchangeRecaptureResolution): void {
+        const lp = (p: Position): string => p.name.replace("Position ", "").slice(0, 1);
+        const origin = [...rr.residualOriginBasis].map(([p, q]) => `${lp(p)}:${q}`).join(",");
+        const deepOrigin = [...rr.residualOriginBasis.keys()].some(p => p !== toPosition);
+        // Upstream edges whose to-side is this surface position and still has open availability —
+        // the still-live edges this residual will blend with in cash.
+        const upstream: string[] = [];
+        const seen = new Set<Exchange>();
+        for (const tx of this.transactions)
+            for (const node of [...tx.inputs, ...tx.outputs]) {
+                const ex = (node as { exchange?: Exchange }).exchange;
+                if (!ex || seen.has(ex)) continue;
+                seen.add(ex);
+                if (ex.to.position === toPosition) {
+                    const avail = ex.to.calculateAvailable(this.transactions);
+                    if (avail > 0n) upstream.push(`${lp(ex.from.position)}->${lp(ex.to.position)} openTo=${avail}`);
+                }
+            }
+        console.error(`[MINT gain ${rr.residualQuantity} in ${lp(toPosition)} origin={${origin}} deepOrigin=${deepOrigin}] principal=${rr.totalCostBasis} | open upstream edges into ${lp(toPosition)}: ${upstream.join(" | ") || "none"}`);
     }
 
     // Residual-derived value carried back to its origin (target == the residual's origin): close the
@@ -342,7 +421,10 @@ export class ExchangeResolution {
                 closeOutputs.push(close);
             } else {
                 for (const edge of carryBack.enclosingEdges)
-                    enclosingRecaptures.push(edge.exchange.recapture(edge.toQuantity, this.transactions));
+                    // Reclaim the exact from-side the carry-back scaling tracked (the residual's
+                    // surface share rewound through this edge), not a rate re-derivation from the
+                    // rounded to-side — otherwise the residual's surface hop loses a remainder.
+                    enclosingRecaptures.push(edge.exchange.recapture(edge.toQuantity, this.transactions, edge.fromQuantity));
                 hopCloseSettlements.push({ position: carryBack.surfacePosition, outputs: [close] });
             }
 
@@ -396,6 +478,7 @@ export class ExchangeResolution {
         return [
             ...this.recaptureResolution.recaptures.filter(r => r.settlement.source.position === this.fromPosition).map(r => r.settlement),
             ...this.settledResiduals.enclosingRecaptures.filter(r => r.settlement.source.position === this.fromPosition).map(r => r.settlement),
+            ...(this.recaptureResolution.surfaceRemainderSettlement ? [this.recaptureResolution.surfaceRemainderSettlement] : []),
             ...(this.exchange ? [this.exchange.from] : []),
             ...this.settledResiduals.closedOutputs,
         ];

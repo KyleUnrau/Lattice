@@ -27,6 +27,7 @@ export interface Fixture {
     drawings: Account;
     openingBalance: Account;
     exchangeExpense: TerminalAccount;
+    rentExpense: TerminalAccount;
     capitalGains: ResidualAccount;
     capitalLosses: TerminalAccount;
     cadToUsd: ExchangeAccount;
@@ -61,6 +62,7 @@ export function makeFixture(): Fixture {
     const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
     const drawings = equity.addAccount("Drawings", Orientation.Negative, fifo<UTXO>, fifo<UTXI>);
     const exchangeExpense = expenses.addTerminalAccount("Exchange Expense", Orientation.Positive);
+    const rentExpense = expenses.addTerminalAccount("Rent Expense", Orientation.Positive);
 
     const netCapitalGains = netIncome.addFolder("Net Capital Gains (Losses)", Orientation.Positive);
     const capitalGains = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
@@ -75,7 +77,7 @@ export function makeFixture(): Fixture {
     const usdToBtc = equity.addExchangeAccount("Transfers USD→BTC", Orientation.Positive);
     const cadToOranges = equity.addExchangeAccount("Transfers CAD→Oranges", Orientation.Positive);
 
-    return { cad, usd, oranges, btc, ledger, engine, cash, inventory, wallet, drawings, openingBalance, exchangeExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad, btcToCad, usdToCad, cadToBtc, usdToBtc, cadToOranges };
+    return { cad, usd, oranges, btc, ledger, engine, cash, inventory, wallet, drawings, openingBalance, exchangeExpense, rentExpense, capitalGains, capitalLosses, cadToUsd, usdToOranges, orangesToCad, btcToCad, usdToCad, cadToBtc, usdToBtc, cadToOranges };
 }
 
 /** Commits an opening-balance credit of `value` units of `position` into `cash`. */

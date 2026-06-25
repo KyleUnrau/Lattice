@@ -331,10 +331,13 @@ export function buildExchange(view: LedgerView, reg: Registry, id: string, upToR
     const upTo = clampUpTo(view, upToRaw);
     const slice = sliceUpTo(view, upTo);
 
-    const { from, to } = exchange;
+    const { from, to, fromAccount, toAccount } = exchange;
     const fromAvailable = from.calculateAvailable(slice);
     const toAvailable = to.calculateAvailable(slice);
-    const account = exchange.account as AccountNode | undefined;
+    // One scoping account when both sides book to the same place; otherwise show the from→to pair.
+    const account = fromAccount === toAccount
+        ? { id: reg.accountIdOf(fromAccount) ?? null, name: fromAccount.name }
+        : { id: null, name: `${fromAccount.name} → ${toAccount.name}` };
 
     const recapturedTo = to.quantity - toAvailable;
     const status = recapturedTo === 0n ? "open" : toAvailable === 0n ? "recaptured" : "partial";
@@ -352,7 +355,7 @@ export function buildExchange(view: LedgerView, reg: Registry, id: string, upToR
 
     return {
         id,
-        account: account ? { id: reg.accountIdOf(account) ?? null, name: account.name } : null,
+        account,
         from: {
             lotId: reg.idOf(from) ?? null,
             position: from.position.name,

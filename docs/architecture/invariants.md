@@ -26,7 +26,7 @@ These are upheld by the equity-policy layer (`ExchangeResolution`, `swap`, `expe
 |---|---|
 | **Exchange edges link only the exchanged portion** | An exchange/recapture/residual line never spans more value than was actually exchanged. `ExchangeResolution`'s from-side outputs sum to exactly `sum(exchangedInputs)`; its to-side inputs balance exactly against `actualProceeds`. Pass only the exchanged portion as `exchangedInputs`. |
 | **A transaction's outputs are a uniform blend of its inputs** | The `BookValueEngine` attributes each input's basis across *all* outputs proportionally. Lines may share a transaction only when they form one uniform blend; an independent sub-flow (a fee/withdrawal with its own input→output correspondence) must be a **separate transaction**, or its lineage bleeds into the others. See [Exchanges → Partial and Mixed Exchanges](../concepts/exchanges.md). |
-| **A forward exchange is always scoped to an `ExchangePositionsAccount`** | `exchangeAccount` is a required parameter on `ExchangeResolution` and `SwapRequest`. Supply one for every exchange — even a pure loop closure that opens no forward leg (the account carries a zero balance). This prevents any untagged open position from being created. |
+| **A forward exchange is always scoped to a real `ExchangeAccount`** | `exchangeAccount` is a required `ExchangeTarget` (`ExchangeAccount \| { from, to }`) on `ExchangeResolution` and `SwapRequest`. Supply one for every exchange — even a pure loop closure that opens no forward leg (the account carries a zero balance). The type system enforces a concrete `ExchangeAccount` per side, so no untagged or mistyped open position can be created. |
 
 ---
 

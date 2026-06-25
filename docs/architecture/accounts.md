@@ -106,24 +106,28 @@ A computed account that scans transactions for remaining `ExchangedUTXO` and `Ex
 
 Adding this account to the equity tree ensures `ledger.verify()` passes even with open, partially-settled exchanges: each open exchange contributes a matching +/− pair that cancels with the asset-side flows that funded it.
 
-**Universal mode** (default) — one account covering all exchanges with no explicit scoping assignment:
+Every exchange is **always scoped** to a real `ExchangeAccount` per side via its `ExchangeTarget`. An `ExchangeAccount` sums an exchange's from-side only when `exchange.fromAccount === this`, and its to-side only when `exchange.toAccount === this`. There is no untagged/universal mode: the type system requires a concrete `ExchangeAccount` (or a `{ from, to }` pair), so an open position can never be silently minted unattributed.
+
+**Single account, both sides** — one account tracks a whole exchange direction:
 
 ```ts
-const exchangePositions = equity.addExchangeAccount("Net Transfers In (Out)", Orientation.Positive);
-// All swaps/ExchangeResolutions that don't pass exchangeAccount appear here
-```
-
-**Scoped mode** — multiple accounts, each tracking a specific exchange direction by passing the account to `swap()` or `ExchangeResolution`. Each forward exchange is tagged to exactly one account; exchanges tagged to a different account are excluded.
-
-```ts
-const cadToUsdPositions    = equity.addExchangeAccount("Transfers CAD→USD",    Orientation.Positive);
+const cadToUsdPositions     = equity.addExchangeAccount("Transfers CAD→USD",     Orientation.Positive);
 const usdToOrangesPositions = equity.addExchangeAccount("Transfers USD→Oranges", Orientation.Positive);
 
-swap({ ..., exchangeAccount: cadToUsdPositions });    // phase 1 exchange tagged here
+swap({ ..., exchangeAccount: cadToUsdPositions });     // phase 1 exchange tagged here
 swap({ ..., exchangeAccount: usdToOrangesPositions }); // phase 2 exchange tagged here
 ```
 
-When using scoped accounts, every forward exchange should be explicitly tagged to exactly one account. Untagged exchanges (those created by `swap()` or `ExchangeResolution` without an `exchangeAccount`) appear in all accounts that are in universal mode (i.e., have never been used as a tag). Mixing tagged and untagged exchanges on the same ledger is allowed but requires care: the universal account will capture everything untagged, while scoped accounts capture only their own.
+**Split per side** — pass a `{ from, to }` pair to book the given-away and received legs in distinct accounts:
+
+```ts
+const transfersOut = equity.addExchangeAccount("Transfers Out", Orientation.Positive);
+const transfersIn  = equity.addExchangeAccount("Transfers In",  Orientation.Negative);
+
+swap({ ..., exchangeAccount: { from: transfersOut, to: transfersIn } });
+```
+
+Each forward exchange is tagged to exactly one account per side; an `ExchangeAccount` only ever sees the exchange sides that name it, so distinct directions/legs never cross-contaminate.
 
 ---
 

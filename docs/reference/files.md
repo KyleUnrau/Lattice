@@ -26,7 +26,7 @@ src/
 │   ├── transactions/                          [kernel] Lot and exchange primitives
 │   │   ├── inputs.ts                          UTXI, UTXOConsumption, Input union type
 │   │   ├── outputs.ts                         UTXO, UTXIConsumption, Output union type
-│   │   ├── cross-position.ts                  Exchange, ExchangedUTXO/UTXI, ResidualUTXI (gain edge), ExchangeAccountMarker
+│   │   ├── cross-position.ts                  Exchange (fromAccount/toAccount), ExchangedUTXO/UTXI, ResidualUTXI (gain edge), ExchangeTarget
 │   │   └── terminal.ts                         TerminalUTXO — non-consumable terminal settlement record (expenses, realized losses)
 │   │
 │   └── disposal-methods/                      [kernel] Lot selection strategies

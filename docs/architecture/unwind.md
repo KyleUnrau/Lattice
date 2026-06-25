@@ -44,7 +44,7 @@ interface UnwindPlan {
 - **`recaptures`** — one entry per distinct `Exchange` instance, with summed to-side and from-side quantities across all branches. Even when the same exchange appears in multiple basis paths (because the consumed UTXOs each carry a fraction of it), it is recaptured exactly once.
 - **`recovered`** — the terminal-position basis recovered from closed loops: for loop mode this is the from-side basis of the loop ancestors; for full mode this is the origin-position leaves.
 - **`residualCarryBacks`** — *loop mode only*. A residual is a **directional suspended edge** from its origin position(s) to its surface. Only directly-held residuals whose origin basis includes `stopAt` are surfaced here: moving such value back toward its origin carries it back (settle the surface leg, re-recognize at origin). Residual slivers whose origin is **not** the target are deliberately absent — they flow through the forward exchange, so a residual never leaks "upward" into an unrelated position.
-- **`residualNodes`** — *full mode only* (`stopAt === null`). Every `ResidualPath` in the consumed lineage; `ExpenseResolution` settles each to its origin.
+- **`residualNodes`** — *full mode only* (`stopAt === null`). Every `ResidualPath` in the consumed lineage. `TerminalResolution` settles only the **suspended** share of each (origin position ≠ surface position) to its origin; the share already recognized *at* its surface (origin position == surface position) is left untouched — it is closed equity, not a deferred edge, and flows as ordinary basis.
 
 ---
 
@@ -86,6 +86,15 @@ recognized gain later deposited into an account and now being spent), direction 
   un-looped value, carrying its lineage onward and leaving the residual edge unresolved. The
   deferred gain/loss stays at its origin and must not leak "upward" into the destination. This is
   what `INV5b` guards (the original `event3` bug).
+
+A residual whose origin **is** its own surface position (e.g. an A→B→A loop gain recognized at A) is
+already realized *at origin* — it is closed equity, not a suspended edge. When such value later flows
+forward (A→B) and the downstream B output is terminalized in a **full unwind**, the residual is nested
+behind the forward edge as ordinary basis: the edge's full recapture already terminalizes it at its
+A origin, so `TerminalResolution` must **not** also close the residual leg or re-recognize it — doing
+so both double-counts the basis and injects an A-position settlement into a B-position transaction.
+Only the genuinely-suspended (away-from-surface) share of a residual settles. `INV5f` guards this
+(expensing the forward output recognizes exactly the edge's basis and leaves the at-origin gain intact).
 
 A recovered **loop loss** (proceeds below the recovered basis) is *terminal* at the loop's origin.
 It is resolved on the role-pure target reclaims, not by carving the consumed surface: the loop

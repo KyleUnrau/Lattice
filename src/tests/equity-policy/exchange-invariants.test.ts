@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
 import { ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
-import type { Position } from "../../ledger-kernel/positions.js";
+import { assertPositionUnifiromity, type Position } from "../../ledger-kernel/positions.js";
 import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
+import { TerminalResolution } from "../../equity-policy/terminal.js";
 import { commitSwap, makeFixture, openInto, type Fixture } from "../utils/ledger-fixture.js";
 
 // ---------------------------------------------------------------------------
@@ -412,6 +413,80 @@ test("INV5e: a residual that moved forward (CAD→USD) still carries back to its
 });
 
 // ---------------------------------------------------------------------------
+// 5f. An already-at-origin residual gain (surface == origin) that later flows FORWARD
+//     behind a non-matching exchange must NOT be settled when the forward output is
+//     terminalized. The recognized gain is closed equity, not a suspended edge: expensing
+//     the downstream value unwinds the forward edge's basis only, never the residual.
+//     (The event0→event4 scenario: 1000 A; 500 A→250 B; 250 B→550 A (50 A gain at A);
+//      expense 50 A then 1000 A→500 B; expense 200 B.)
+// ---------------------------------------------------------------------------
+
+test("INV5f: expensing forward-exchanged value terminalizes only the forward edge's basis — an already-at-origin residual nested behind that edge is left untouched (no double-count, no mixed-position transaction)", () => {
+    const f = makeFixture(); // A = cad, B = usd
+
+    // event0 / event1: open 1000 A, then forward 500 A → 250 B.
+    openInto(f, f.cash, f.cad, 1000);
+    commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 250, f.cadToUsd);
+
+    // event2: 250 B → 550 A closes the A→B→A loop and recognizes a 50 A gain AT A (surface == origin).
+    commitSwap(f, f.cash, f.usd, 250, f.cash, f.cad, 550, f.usdToCad);
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "50 A gain recognized at its own origin A");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "no gain at B");
+
+    // event3a: expense 50 A (drawn from the origin-A leftover, no residual lineage).
+    {
+        const inputs = f.cash.generateInputs(f.cad, 50, f.ledger.transactions);
+        const res = new TerminalResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
+        const ev = f.ledger.beginEvent();
+        ev.record(res.constructTransactions().toGroup());
+        ev.register();
+    }
+
+    // event3b: exchange 1000 A → 500 B. This is an ORDINARY forward — the at-origin residual is part
+    // of the consumed 1000 A and flows forward behind the new edge; it is NOT carried back or closed.
+    const fwd = commitSwap(f, f.cash, f.cad, 1000, f.cash, f.usd, 500, f.cadToUsd);
+    assert.notEqual(fwd.resolution.exchange, null, "event3 opens a plain 1000 A → 500 B forward exchange");
+    assert.equal(fwd.resolution.residualCloseOutputs.length, 0, "the at-origin residual is not carried back by the forward exchange");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "the 50 A gain is untouched by event3");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "no gain re-anchored to B by event3");
+
+    // event4: expense 200 B. Its basis traces to 400 A through the event3 forward edge (1000 A ↔ 500 B).
+    const inputs = f.cash.generateInputs(f.usd, 200, f.ledger.transactions);
+    const res = new TerminalResolution(inputs, f.ledger.transactions, f.engine, f.rentExpense);
+
+    // (Q11/symptom) No residual leg is closed and nothing is re-recognized just because B is expensed.
+    assert.equal(res.residualCloseOutputs.length, 0, "no residual leg closed by expensing B");
+    assert.equal(res.residualRecognitions.length, 0, "no residual re-recognized by expensing B");
+    // The terminal effect is the forward edge's basis ONLY: exactly 400 A, never 400 + 20.
+    assert.equal(res.recaptureGroups.length, 1, "one terminal-origin reclaim");
+    assert.equal(res.recaptureGroups[0]!.position, f.cad, "reclaimed at the A origin");
+    assert.equal(res.recaptureGroups[0]!.totalQuantity, 40000n, "exactly 400 A of basis, not 420 A");
+
+    // (Q9) constructTransactions() must not throw, and every constructed transaction is single-position.
+    let built: ReturnType<typeof res.constructTransactions> | undefined;
+    assert.doesNotThrow(() => { built = res.constructTransactions(); }, "constructTransactions() must not throw a mixed-position error");
+    for (const tx of built!.flatten())
+        assert.doesNotThrow(
+            () => assertPositionUnifiromity({ inputs: tx.inputs, outputs: tx.outputs }),
+            "every constructed terminal transaction must be single-position",
+        );
+
+    const ev = f.ledger.beginEvent();
+    ev.record(built!.toGroup());
+    ev.register();
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after event4");
+
+    // The event4 terminal expense is exactly 400 A and nothing in B (no double-count, no B leakage).
+    assert.equal(f.rentExpense.getSignedBalanceScaled(f.cad, f.ledger.transactions), 40000n, "exactly 400 A terminalized at the A origin");
+    assert.equal(f.rentExpense.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "nothing terminalized in B");
+
+    // The event2 A residual/gain is NOT decreased by event4, and nothing is re-anchored into B.
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.cad, f.ledger.transactions), -5000n, "the 50 A gain at A is unchanged by event4");
+    assert.equal(f.capitalGains.getSignedBalanceScaled(f.usd, f.ledger.transactions), 0n, "no residual re-anchored into B");
+});
+
+// ---------------------------------------------------------------------------
 // 6. Mixed-origin balances remain distinguishable (deterministic FIFO selection).
 // ---------------------------------------------------------------------------
 
@@ -438,4 +513,72 @@ test("INV6: origin USD and CAD-derived USD stay distinct lots; FIFO consumes the
     const inputs = f.cash.generateInputs(f.usd, 1000, f.ledger.transactions);
     assert.equal(inputs.length, 1);
     assert.equal((inputs[0] as UTXOConsumption).source, lotA, "FIFO consumes the oldest (origin USD) lot first");
+});
+
+// ---------------------------------------------------------------------------
+// 7. Intermediate hop transactions stay exactly balanced under rounding.
+//    An edge whose from-side only PARTIALLY loops back is recaptured at a rounded
+//    to-side; the reclaimed from-side must be the exact looped quantity the unwind
+//    tracked, not a re-derivation from that rounded to-side, or the intermediate hop
+//    is left short by the rounding remainder. (The event11 failure.)
+// ---------------------------------------------------------------------------
+
+/** Asserts every hop transaction nets to zero (inputs sum === outputs sum) in its single position. */
+function assertHopsBalance(hops: { inputs: { quantity: bigint }[]; outputs: { quantity: bigint }[] }[]): void {
+    for (const hop of hops) {
+        const inSum = hop.inputs.reduce((s, i) => s + i.quantity, 0n);
+        const outSum = hop.outputs.reduce((s, o) => s + o.quantity, 0n);
+        assert.equal(inSum, outSum, "an intermediate hop transaction must net to zero");
+    }
+}
+
+test("INV7: a partially-looped intermediate edge threads its EXACT looped from-side, so the hop stays balanced despite rounding", () => {
+    const f = makeFixture(); // A = cad, B = usd, C = oranges
+
+    // Build a MIXED-origin USD position: 100 USD derived from 30 CAD (loops back to CAD) plus
+    // 200 USD of plain origin (does not loop). FIFO keeps them ordered cad-derived → origin.
+    openInto(f, f.cash, f.cad, 1000);
+    commitSwap(f, f.cash, f.cad, 30, f.cash, f.usd, 100, f.cadToUsd);  // A→B: 30 CAD → 100 USD (cad-derived)
+    openInto(f, f.cash, f.usd, 200);                                   // 200 USD of origin equity
+
+    // Forward all 300 USD into Oranges as ONE edge, so the Oranges lot is 1/3 cad-derived. The
+    // CAD→USD→Oranges→CAD loop only recovers that 1/3, so the USD→Oranges edge is PARTIALLY looped:
+    // its recapture to-side rounds (1000 × 100/300), and re-deriving the from-side from it would
+    // drift away from the exact 100 USD that actually loops.
+    commitSwap(f, f.cash, f.usd, 300, f.inventory, f.oranges, 1000, f.usdToOranges); // B→C, mixed
+    const closing = commitSwap(f, f.inventory, f.oranges, 1000, f.cash, f.cad, 400, f.orangesToCad); // close → CAD
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after closing a partially-looped multi-hop loop");
+
+    // KEY INVARIANT: the USD intermediate hop nets to zero — the value arriving from the CAD→USD
+    // settlement is reclaimed away exactly by the USD→Oranges from-side, with no stranded remainder.
+    assert.equal(closing.intermediates.length, 1, "one USD intermediate hop");
+    assert.equal(closing.intermediates[0]!.position, f.usd, "the hop nets out the USD position");
+    assertHopsBalance(closing.resolution.getRecaptureHops());
+});
+
+test("INV7b: a nested carry-back threads its EXACT enclosing-edge from-side, so the residual's surface hop stays balanced at a non-dividing rate", () => {
+    const f = makeFixture(); // origin BTC, surface CAD, intermediate USD
+
+    openInto(f, f.wallet, f.btc, 0.02);
+    commitSwap(f, f.wallet, f.btc, 0.01, f.cash, f.cad, 1000, f.btcToCad); // CAD now BTC-derived
+    commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 375, f.cadToUsd);
+    commitSwap(f, f.cash, f.usd, 375, f.cash, f.cad, 550, f.usdToCad);     // 50 CAD residual gain, origin BTC
+
+    // Move the residual-derived CAD FORWARD into USD at a NON-dividing rate, so when the residual
+    // later carries back, rewinding its surface share through this enclosing CAD→USD edge rounds the
+    // to-side — and re-deriving the from-side from it would short the residual's surface (CAD) hop.
+    commitSwap(f, f.cash, f.cad, 1050, f.cash, f.usd, 833, f.cadToUsd);    // forward at an odd rate (nested)
+
+    // USD returns to BTC: the nested residual carries back through the CAD→USD edge, closing its leg
+    // at the CAD hop.
+    const back = commitSwap(f, f.cash, f.usd, 833, f.wallet, f.btc, 0.0105, f.usdToBtc);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after a non-dividing nested carry-back");
+
+    // KEY INVARIANT: every hop threading the carry-back nets to zero — the enclosing edge reclaims
+    // exactly the residual's surface share, so the residual-leg close at the CAD hop is fully backed.
+    const hops = back.resolution.getRecaptureHops();
+    assert.ok(hops.some(h => h.position === f.cad), "the nested residual closes at the CAD surface hop");
+    assertHopsBalance(hops);
 });

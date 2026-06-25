@@ -183,6 +183,42 @@ function collectCarryBacksInto(
 }
 
 /**
+ * The exact surface-position quantity of a consumed `basis` whose provenance is **genuinely
+ * forward** relative to loop-mode `target` — value that neither loops back to `target` nor is a
+ * residual whose origin includes `target` (a carry-back). This is the surface that legitimately
+ * opens a forward exchange.
+ *
+ * It is computed straight from the basis tree, so — unlike the recapture/carry-back surface, whose
+ * to-sides are rounded down as each edge is threaded — it is independent of that truncation. When it
+ * is `0n`, the entire draw provably loops or carries back: any surface the recaptures/carry-backs
+ * leave un-settled is pure rounding noise and must be settled *into the loop* (recognizing its
+ * proceeds as gain) rather than stranded behind a forward edge that nothing will ever close.
+ */
+export function forwardSurfaceQuantity(basis: BasisPath[], target: Position): bigint {
+    let forward = 0n;
+    for (const path of basis) {
+        if (path.type === "origin") {
+            // A bare origin in loop mode is a dead end (surface value with no exchange to unwind);
+            // moving it onward is a genuine forward.
+            forward += path.quantity;
+        } else if (path.type === "residual") {
+            // Only the share whose origin is NOT the target flows forward; the target-origin share
+            // is a carry-back (settled in place, never forwarded).
+            const originTotal = [...path.originBasis.values()].reduce((sum, q) => sum + q, 0n);
+            const matching = path.originBasis.get(target) ?? 0n;
+            if (originTotal > 0n) forward += path.quantity * (originTotal - matching) / originTotal;
+        } else if (path.exchange.from.position !== target) {
+            // An intermediate edge: only the fraction of its surface whose deeper lineage is itself
+            // forward continues forward; the looped / carried-back fraction does not. (A loop-ancestor
+            // edge — from-side IS the target — loops entirely and contributes nothing.)
+            const subForward = forwardSurfaceQuantity(path.basis, target);
+            if (path.fromQuantity > 0n) forward += path.quantity * subForward / path.fromQuantity;
+        }
+    }
+    return forward;
+}
+
+/**
  * Aggregates {@link RecaptureEdge}s by exchange instance, summing the to-side and from-side
  * quantities across all edges sharing the same exchange. Ensures each exchange is recaptured
  * exactly once even when its lineage appears across multiple consumed UTXOs or branches.

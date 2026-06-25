@@ -1,16 +1,18 @@
 import type { Recapture } from "../../equity-policy/recaptures.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import type { ResidualAccount } from "../accounts/computed.js";
+import type { ExchangeAccount, ResidualAccount } from "../accounts/computed.js";
 import { UTXI } from "./inputs.js";
 import { UTXO } from "./outputs.js";
 
 /**
- * Implemented by {@link ExchangePositionsAccount} and used as an opaque tag on {@link Exchange}
- * to scope which exchanges a given account includes in its balance computation. Defined here
- * rather than in `accounts/computed.ts` to avoid a circular import.
+ * Where an {@link Exchange}'s open position is booked. Either a single {@link ExchangeAccount}
+ * scoping both sides, or a `{from, to}` pair scoping each side independently — letting the value
+ * given away and the value received land in distinct equity accounts (e.g. separate "Transfers
+ * Out" and "Transfers In" lines). Imported as a type only, so this carries no runtime dependency
+ * on `accounts/computed.ts` (which depends on this module for its `instanceof` checks).
  */
-export interface ExchangeAccountMarker {}
+export type ExchangeTarget = ExchangeAccount | { from: ExchangeAccount; to: ExchangeAccount };
 
 /**
  * Links two single-position transactions through a locked conversion rate.
@@ -18,21 +20,31 @@ export interface ExchangeAccountMarker {}
  * `.to` is an {@link ExchangedUTXI} placed in the destination transaction's inputs (value received).
  * The rate is immutable after construction: `from.quantity / to.quantity`.
  *
- * Prefer constructing exchanges via the `exchange()` equity-policy function rather than
- * instantiating this class directly, so that prior exchange lineages are recaptured correctly
- * and `forwardExchange` is only created when actually needed.
+ * `fromAccount`/`toAccount` are the {@link ExchangeAccount}s that book each side's open position;
+ * an {@link ExchangeAccount} sums a side only when that side's account is itself. They are derived
+ * from the {@link ExchangeTarget} passed at construction (a single account scopes both sides).
+ *
+ * Prefer constructing exchanges via {@link ExchangeResolution} rather than instantiating this class
+ * directly, so that prior exchange lineages are recaptured correctly and a forward exchange is only
+ * created when actually needed.
  */
 export class Exchange {
     public readonly from: ExchangedUTXO;
     public readonly to: ExchangedUTXI;
+    /** Books the from-side (value given away) open position. */
+    public readonly fromAccount: ExchangeAccount;
+    /** Books the to-side (value received) open position. */
+    public readonly toAccount: ExchangeAccount;
 
     constructor(
         from: {quantity: bigint, position: Position},
         to: {quantity: bigint, position: Position},
-        public readonly account?: ExchangeAccountMarker
+        target: ExchangeTarget
     ) {
         this.from = new ExchangedUTXO(from.quantity, from.position, this);
         this.to = new ExchangedUTXI(to.quantity, to.position, this);
+        this.fromAccount = "from" in target ? target.from : target;
+        this.toAccount = "to" in target ? target.to : target;
     }
 
     /**
@@ -42,13 +54,17 @@ export class Exchange {
      * from-side (`.from`).
      *
      * @param quantity - Amount of the to-side to recapture; must not exceed remaining availability.
+     * @param fromQuantity - The exact from-side amount to reclaim. Pass the value the unwind already
+     *   tracked for this edge ({@link RecaptureEdge.fromQuantity}) so the reclaim threads the loop
+     *   without rounding drift; omit to re-derive it from the locked rate (the round-trip can lose a
+     *   remainder when `quantity` was itself rounded, unbalancing an intermediate hop).
      */
-    public recapture(quantity: bigint, transactions: Transaction[]): Recapture {
-        const fromQuantity: bigint = this.from.quantity * quantity / this.to.quantity;
+    public recapture(quantity: bigint, transactions: Transaction[], fromQuantity?: bigint): Recapture {
+        const reclaimQuantity: bigint = fromQuantity ?? this.from.quantity * quantity / this.to.quantity;
 
         return {
             settlement: this.to.consume(quantity, transactions),
-            reclaim: this.from.consume(fromQuantity, transactions)
+            reclaim: this.from.consume(reclaimQuantity, transactions)
         };
     }
 }

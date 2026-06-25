@@ -3,7 +3,7 @@ import type { Result } from "../utils.js";
 import { Transaction, TransactionGroup, type TransactionLike } from "./transactions.js";
 import type { AccountFolder } from "./accounts/folder.js";
 import type { FolderSummary } from "./accounts/summary.js";
-import { GenerationContext } from "./generation-context.js";
+import { EventBuilder, GenerationContext } from "./generation-context.js";
 
 export enum Orientation {
     Positive = 1,
@@ -96,59 +96,4 @@ export interface LedgerSummary {
     position: Position;
     netAssets: FolderSummary;
     equity: FolderSummary;
-}
-
-/**
- * Accumulates several sub-flows into one composite {@link TransactionGroup}. Each {@link record}
- * commits its sub-flow's leaves to the ledger immediately — so a subsequent resolution constructed
- * against `ledger.transactions` sees them as already spent — while nesting the sub-flow under the
- * event being built. {@link register} registers the composite as a single top-level event. Obtain one
- * via {@link Ledger.beginEvent}.
- */
-export class EventBuilder {
-    public readonly context: GenerationContext;
-    public readonly members: (Transaction | TransactionGroup)[] = [];
-
-    constructor(
-        private readonly ledger: Ledger
-    ) {
-        this.context = new GenerationContext(ledger.transactions);
-    }
-
-    /** Commits `group`'s leaves now and nests it under the event as a sub-flow. */
-    public record(transaction: Transaction | TransactionGroup): void {
-        this.members.push(transaction);
-    }
-
-    public newTransaction(transactionLike: TransactionLike): Transaction {
-        const transaction: Transaction = (transactionLike instanceof Transaction) ? transactionLike : new Transaction(transactionLike.inputs, transactionLike.outputs, this.view());
-        this.record(transaction);
-        return transaction;
-    } 
-
-    public newGroup(...transactionLikes: (TransactionLike | TransactionGroup)[]): TransactionGroup {
-        const members: (Transaction | TransactionGroup)[] = [];
-        for (const transactionLike of transactionLikes) {
-            if (transactionLike instanceof Transaction || transactionLike instanceof TransactionGroup) members.push(transactionLike);
-            else members.push(new Transaction(transactionLike.inputs, transactionLike.outputs, this.view()));
-        }
-
-        const group = new TransactionGroup(members);
-        this.record(group);
-        return group;
-    }
-
-    public generateGroup(): TransactionGroup {
-        if (this.members.length === 1 && this.members[0] instanceof TransactionGroup) return this.members[0];
-        return new TransactionGroup(this.members);
-    }
-
-    /** Registers the accumulated sub-flows as one composite top-level event. */
-    public register(): TransactionGroup {
-        return this.ledger.appendGroup(this.generateGroup());
-    }
-
-    public view(): Transaction[] {
-        return [...this.ledger.transactions, ...this.members.flatMap((value) => ((value instanceof Transaction) ? value : value.flatten()))];
-    }
 }

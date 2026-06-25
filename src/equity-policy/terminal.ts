@@ -60,10 +60,14 @@ export class TerminalTransactions {
  * positions net to zero through hop transactions, and the recovered value is recognized in the
  * **terminal origin** position(s) it ultimately came from ({@link recaptureGroups}). Surface-position
  * value with no lineage is recognized directly in the consuming transaction ({@link originAmounts}).
- * Residual-derived value has its leg closed ({@link residualCloseOutputs}) and its deferred
- * origin-basis equity re-recognized — within the same {@link ResidualAccount} that originally minted
- * the residual (read off `node.residual.account`), not the terminal account — then recognized there
- * ({@link residualRecognitions}).
+ * *Suspended* residual-derived value (a residual whose surface position differs from its origin) has
+ * its leg closed ({@link residualCloseOutputs}) and its deferred origin-basis equity re-recognized —
+ * within the same {@link ResidualAccount} that originally minted the residual (read off
+ * `node.residual.account`), not the terminal account — then recognized there
+ * ({@link residualRecognitions}). A residual already recognized *at its own origin* (surface position
+ * == origin position, e.g. an A→B→A loop gain at A) is **not** a suspended edge: its value flows as
+ * ordinary basis, terminalized by the enclosing exchange recapture or the surface remainder, and its
+ * gain is left untouched — never closed, re-anchored, or re-recognized by the terminal settlement.
  *
  * Commit order: the consuming transaction first, then the hops (so the origin amounts they thread
  * are available), then the terminal recognitions.
@@ -128,19 +132,39 @@ export class TerminalResolution {
         }));
     }
 
-    // Residual-derived value: close each open residual leg, then re-recognize its deferred
+    // Residual-derived value: close each *suspended* residual leg, then re-recognize its deferred
     // origin-basis equity in the origin position. The recognition is a position-shift within the
     // residual's *own* account (keyed off the lot, which carries its account), so value tracing
     // through residuals from different accounts never collapses into one.
+    //
+    // A residual is a suspended edge only while its surface position differs from its origin. The
+    // share of a residual's origin basis sitting *at its own surface position* is already recognized
+    // at origin — ordinary value, not a deferred edge — so it is excluded here: its surface value
+    // flows as ordinary basis (already terminalized by the enclosing exchange's full recapture when
+    // the residual is nested behind a forward edge, or by the surface remainder when directly held),
+    // and its already-recognized gain is left untouched. A residual whose origin is *entirely* its
+    // own surface position (e.g. an A→B→A loop gain recognized at A) is therefore never closed or
+    // re-recognized by a later terminal settlement — only the genuinely-suspended (away-from-surface)
+    // share settles to its true origin.
     private settleResiduals(plan: UnwindPlan): { closeOutputs: Output[]; recognitions: TerminalResidualRecognition[]; } {
         const closeOutputs: Output[] = [];
         const originTotals = new Map<ResidualAccount, Map<Position, bigint>>();
         for (const node of plan.residualNodes) {
-            closeOutputs.push(node.residual.consume(node.quantity, this.transactions));
+            const surface = node.residual.position;
+            const originTotal = [...node.originBasis.values()].reduce((sum, q) => sum + q, 0n);
+            const suspendedTotal = originTotal - (node.originBasis.get(surface) ?? 0n);
+            if (suspendedTotal <= 0n) continue; // recognized-at-origin: not a suspended edge, leave it.
+
+            // Close only the suspended share of the surface leg; the at-origin share stays put and
+            // flows as ordinary basis, so it is neither double-closed nor double-counted.
+            const closeQuantity = node.quantity * suspendedTotal / originTotal;
+            closeOutputs.push(node.residual.consume(closeQuantity, this.transactions));
             let byPosition = originTotals.get(node.residual.account);
             if (!byPosition) originTotals.set(node.residual.account, byPosition = new Map<Position, bigint>());
-            for (const [position, quantity] of node.originBasis)
+            for (const [position, quantity] of node.originBasis) {
+                if (position === surface) continue; // recognized-at-origin share — excluded from settlement.
                 byPosition.set(position, (byPosition.get(position) ?? 0n) + quantity);
+            }
         }
 
         const recognitions: TerminalResidualRecognition[] = [];

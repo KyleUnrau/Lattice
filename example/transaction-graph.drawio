@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="6xWdA7GWYxQrHusjy1R9" name="Page-1">
-        <mxGraphModel dx="357" dy="245" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+        <mxGraphModel dx="792" dy="778" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -19,7 +19,7 @@
                 <mxCell id="9" style="edgeStyle=none;html=1;" parent="1" source="6" target="8" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="28" style="edgeStyle=none;html=1;dashed=1;" edge="1" parent="1" source="6" target="26">
+                <mxCell id="28" style="edgeStyle=none;html=1;dashed=1;" parent="1" source="6" target="26" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="6" value="&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;UTXOConsumption&lt;/span&gt;&lt;br style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgb(226, 226, 226) rgb(251, 251, 251);&quot;&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;Transaction #1&lt;/span&gt;&lt;br style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgb(226, 226, 226) rgb(251, 251, 251);&quot;&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;phase1.from.inputs[0]&lt;/span&gt;&lt;br style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgb(226, 226, 226) rgb(251, 251, 251);&quot;&gt;&lt;br style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgb(226, 226, 226) rgb(251, 251, 251);&quot;&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;500 (CAD)&lt;/span&gt;" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#f8cecc;strokeColor=#b85450;" parent="1" vertex="1">
@@ -53,37 +53,95 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="14" value="UTXOConsumption&lt;br&gt;Transaction #3&lt;br&gt;phase2.from.inputs[0]&lt;br&gt;&lt;br&gt;375 (USD)" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#f8cecc;strokeColor=#b85450;" parent="1" vertex="1">
-                    <mxGeometry x="875" y="310" width="150" height="90" as="geometry"/>
+                    <mxGeometry x="875" y="330" width="150" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="20" style="edgeStyle=none;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#FF8000;" parent="1" source="16" target="19" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="16" value="UTXIConsumption&lt;br&gt;Transaction #3&lt;br&gt;phase2.from.outputs[0]&lt;br&gt;&lt;br&gt;375 (USD)" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#d5e8d4;strokeColor=#FF8000;" parent="1" vertex="1">
-                    <mxGeometry x="675" y="310" width="150" height="90" as="geometry"/>
+                    <mxGeometry x="675" y="330" width="150" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="29" style="edgeStyle=none;html=1;" edge="1" parent="1" source="19" target="23">
+                <mxCell id="29" style="edgeStyle=none;html=1;" parent="1" source="19" target="23" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="19" value="&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;UTXOConsumption&lt;/span&gt;&lt;br style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgb(226, 226, 226) rgb(251, 251, 251);&quot;&gt;Transaction #4&lt;br&gt;phase2.to.inputs[0]&lt;br&gt;&lt;br&gt;500 (CAD)" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#f8cecc;strokeColor=#FF8000;" parent="1" vertex="1">
-                    <mxGeometry x="465" y="310" width="150" height="90" as="geometry"/>
-                </mxCell>
-                <mxCell id="31" style="edgeStyle=none;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="23" target="30">
-                    <mxGeometry relative="1" as="geometry"/>
+                    <mxGeometry x="465" y="330" width="150" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="23" value="UTXO&lt;br&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;Transaction #4&lt;/span&gt;&lt;br&gt;phase2.to.outputs[0]&lt;br&gt;&lt;br&gt;Cash&lt;br&gt;550 (CAD)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
-                    <mxGeometry x="460" y="440" width="160" height="100" as="geometry"/>
+                    <mxGeometry x="460" y="470" width="160" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="25" style="edgeStyle=none;html=1;strokeColor=#FF00FF;" parent="1" source="24" target="23" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="24" value="ResidualUTXI&lt;br&gt;Transaction #4&lt;br&gt;phase2.to.inputs[1]&lt;br&gt;&lt;br&gt;Capital Gains or Losses&lt;br&gt;50 (CAD)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#FF33FF;" parent="1" vertex="1">
-                    <mxGeometry x="675" y="440" width="160" height="100" as="geometry"/>
+                    <mxGeometry x="675" y="470" width="160" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="26" value="UTXOConsumption&lt;br&gt;Transaction #5&lt;br&gt;&lt;br&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+                <mxCell id="26" value="UTXOConsumption&lt;br&gt;Transaction #5&lt;br&gt;&lt;br&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#f8cecc;strokeColor=#b85450;" parent="1" vertex="1">
                     <mxGeometry x="255" y="310" width="150" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="30" value="" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillStyle=solid;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
-                    <mxGeometry x="465" y="580" width="150" height="90" as="geometry"/>
+                <mxCell id="31" value="Basis Flows" style="swimlane;startSize=20;horizontal=1;containerType=tree;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" collapsed="1" parent="1">
+                    <mxGeometry x="670" y="275" width="160" height="30" as="geometry">
+                        <mxRectangle x="670" y="270" width="260" height="210" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="32" value="" style="edgeStyle=elbowEdgeStyle;elbow=vertical;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;curved=0;" edge="1" parent="31" source="34" target="35">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <UserObject label="phase1.from.outputs[0]&lt;br&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;500 (CAD)&lt;/span&gt;" treeRoot="1" id="34">
+                    <mxCell style="whiteSpace=wrap;html=1;align=center;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="31">
+                        <mxGeometry x="10" y="30" width="140" height="60" as="geometry"/>
+                    </mxCell>
+                </UserObject>
+                <mxCell id="35" value="phase1.to.inputs[0]&lt;br&gt;375 (USD)" style="whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="31">
+                    <mxGeometry x="25" y="120" width="110" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="37" value="Basis Flows" style="swimlane;startSize=20;horizontal=1;containerType=tree;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" collapsed="1" parent="1">
+                    <mxGeometry x="870" y="275" width="160" height="30" as="geometry">
+                        <mxRectangle x="670" y="270" width="260" height="210" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="38" value="" style="edgeStyle=elbowEdgeStyle;elbow=vertical;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;curved=0;" edge="1" parent="37" source="39" target="40">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <UserObject label="phase1.from.outputs[0]&lt;br&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;500 (CAD)&lt;/span&gt;" treeRoot="1" id="39">
+                    <mxCell style="whiteSpace=wrap;html=1;align=center;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="37">
+                        <mxGeometry x="10" y="30" width="140" height="60" as="geometry"/>
+                    </mxCell>
+                </UserObject>
+                <mxCell id="40" value="phase1.to.inputs[0]&lt;br&gt;375 (USD)" style="whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="37">
+                    <mxGeometry x="25" y="120" width="110" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="41" value="Basis Flows" style="swimlane;startSize=20;horizontal=1;containerType=tree;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" collapsed="1" parent="1">
+                    <mxGeometry x="895" y="420" width="110" height="30" as="geometry">
+                        <mxRectangle x="670" y="270" width="260" height="210" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="42" value="" style="edgeStyle=elbowEdgeStyle;elbow=vertical;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;curved=0;" edge="1" parent="41" source="43" target="44">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <UserObject label="phase1.from.outputs[0]&lt;br&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;500 (CAD)&lt;/span&gt;" treeRoot="1" id="43">
+                    <mxCell style="whiteSpace=wrap;html=1;align=center;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="41">
+                        <mxGeometry x="10" y="30" width="140" height="60" as="geometry"/>
+                    </mxCell>
+                </UserObject>
+                <mxCell id="44" value="phase1.to.inputs[0]&lt;br&gt;375 (USD)" style="whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="41">
+                    <mxGeometry x="25" y="120" width="110" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="45" value="Basis Flows" style="swimlane;startSize=20;horizontal=1;containerType=tree;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" collapsed="1" parent="1">
+                    <mxGeometry x="695" y="420" width="110" height="30" as="geometry">
+                        <mxRectangle x="700" y="420" width="260" height="210" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="46" value="" style="edgeStyle=elbowEdgeStyle;elbow=vertical;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;curved=0;" edge="1" parent="45" source="47" target="48">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <UserObject label="phase1.from.outputs[0]&lt;br&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;500 (CAD)&lt;/span&gt;" treeRoot="1" id="47">
+                    <mxCell style="whiteSpace=wrap;html=1;align=center;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="45">
+                        <mxGeometry x="10" y="30" width="140" height="60" as="geometry"/>
+                    </mxCell>
+                </UserObject>
+                <mxCell id="48" value="phase1.to.inputs[0]&lt;br&gt;375 (USD)" style="whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;newEdgeStyle={&quot;edgeStyle&quot;:&quot;elbowEdgeStyle&quot;,&quot;startArrow&quot;:&quot;none&quot;,&quot;endArrow&quot;:&quot;none&quot;};" vertex="1" parent="45">
+                    <mxGeometry x="25" y="120" width="110" height="60" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>

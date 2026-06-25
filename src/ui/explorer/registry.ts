@@ -70,10 +70,13 @@ export class Registry {
         this.lotId.set(obj, id);
         this.lotById.set(id, obj);
 
-        if (obj instanceof ResidualUTXI || obj instanceof TerminalUTXO) this.owner.set(obj, obj.account as unknown as AccountNode);
-        if (obj instanceof ExchangedUTXO || obj instanceof ExchangedUTXI) {
-            const account = obj.exchange.account as AccountNode | undefined;
-            if (account) this.owner.set(obj, account);
+        if (obj instanceof ResidualUTXI || obj instanceof TerminalUTXO) this.owner.set(obj, obj.account);
+        if (obj instanceof ExchangedUTXO) {
+            this.owner.set(obj, obj.exchange.fromAccount);
+            this.registerExchange(obj.exchange);
+        }
+        if (obj instanceof ExchangedUTXI) {
+            this.owner.set(obj, obj.exchange.toAccount);
             this.registerExchange(obj.exchange);
         }
     }

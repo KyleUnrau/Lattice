@@ -5,15 +5,24 @@
 An `Exchange` links two single-position transactions at a **locked conversion rate**. Once created, the rate is immutable.
 
 ```ts
-// Exchange(from, to) where each side is { quantity: bigint, position: Position }
+// Exchange(from, to, target) where each side is { quantity: bigint, position: Position }
+// and `target` is an ExchangeTarget that books each side's open position.
 const ex = new Exchange(
     { quantity: 50000n, position: cad },  // from: 500.00 CAD
-    { quantity: 37500n, position: usd }   // to:   375.00 USD
+    { quantity: 37500n, position: usd },  // to:   375.00 USD
+    cadToUsdPositions                     // ExchangeTarget: one ExchangeAccount scopes both sides
 );
 
-ex.from  // ExchangedUTXO: the "given-away" lot; goes in the CAD transaction's outputs
-ex.to    // ExchangedUTXI: the "received" lot;   goes in the USD transaction's inputs
+ex.from        // ExchangedUTXO: the "given-away" lot; goes in the CAD transaction's outputs
+ex.to          // ExchangedUTXI: the "received" lot;   goes in the USD transaction's inputs
+ex.fromAccount // ExchangeAccount booking the from-side's open position
+ex.toAccount   // ExchangeAccount booking the to-side's open position
 ```
+
+`target` is an **`ExchangeTarget`**: either a single `ExchangeAccount` (both sides book to it) or a
+`{ from, to }` pair of `ExchangeAccount`s to book the given-away and received legs in distinct equity
+accounts. An `ExchangeAccount` sums an exchange side only when that side's account is itself — there is
+no untagged/universal mode, so every open position is always attributed to exactly one account per side.
 
 The locked rate is always `from.quantity / to.quantity` — the ratio at the time of the exchange.
 
@@ -125,7 +134,7 @@ ledger.newTransaction(res.getToInputs(), res.getToOutputs());
 
 **`residualAccount`** accepts either a single `ResidualAccount` (gains and losses share it) or `{ gain: ResidualAccount, loss: ResidualAccount }` to route them to separate accounts. `gainAccountOf(target)` and `lossAccountOf(target)` (exported from `ledger-kernel/accounts/computed.ts`) extract one side from a `ResidualTarget` when needed.
 
-**`exchangeAccount`** scopes the forward exchange to a specific `ExchangeAccount`'s open-position view. It is **always required** — supply one even when the exchange fully closes a loop and no forward leg opens (the account will simply carry a zero balance). This keeps the type consistent and avoids silently minting an untagged, unscoped open position.
+**`exchangeAccount`** is an **`ExchangeTarget`** (`ExchangeAccount | { from: ExchangeAccount, to: ExchangeAccount }`) that scopes the forward exchange's open position — a single account for both sides, or a `{ from, to }` pair to book each leg separately. It is **always required** — supply one even when the exchange fully closes a loop and no forward leg opens (the account will simply carry a zero balance). The type system enforces a real `ExchangeAccount`, so an untagged or mistyped open position cannot be silently minted.
 
 ---
 

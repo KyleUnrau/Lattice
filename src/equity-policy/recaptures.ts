@@ -5,7 +5,7 @@ import type { Input, UTXOConsumption } from "../ledger-kernel/transactions/input
 import type { Output, UTXIConsumption } from "../ledger-kernel/transactions/outputs.js";
 import { collectChainEdges, groupRecapturesByExchange, collectResidualNodes, collectCarryBacks } from "./book-value/lineage.js";
 import type { ResidualCarryBack } from "./book-value/lineage.js";
-import type { BasisPath, ResidualPath } from "./book-value/engine.js";
+import type { BasisPath, BookValueEngine, ResidualPath } from "./book-value/engine.js";
 
 /** A single-position settlement transaction emitted as part of a multi-hop unwind. */
 export interface HopTransaction {
@@ -71,9 +71,12 @@ export interface Recapture {
  */
 export function executeRecaptures(plan: UnwindPlan, transactions: Transaction[]): Recapture[] {
     const recaptures: Recapture[] = [];
-    for (const [exchange, { toQuantity }] of plan.recaptures) {
+    for (const [exchange, { toQuantity, fromQuantity }] of plan.recaptures) {
         if (toQuantity <= 0n) continue;
-        recaptures.push(exchange.recapture(toQuantity, transactions));
+        // Reclaim the exact looped from-side the unwind tracked, not a re-derivation from the
+        // (already-rounded) to-side — the from-side is the quantity threaded onward through each
+        // hop, so re-rounding it would strand a remainder and unbalance the intermediate hop.
+        recaptures.push(exchange.recapture(toQuantity, transactions, fromQuantity));
     }
     return recaptures;
 }

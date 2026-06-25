@@ -2,7 +2,6 @@ import type { Orientation } from "../ledger.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
 import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI } from "../transactions/cross-position.js";
-import type { ExchangeAccountMarker } from "../transactions/cross-position.js";
 import { TerminalUTXO } from "../transactions/terminal.js";
 import { unscale } from "../positions.js";
 import type { AccountNode } from "./node.js";
@@ -59,25 +58,27 @@ export abstract class ComputedAccount implements AccountNode {
 }
 
 /**
- * Tracks all open exchange positions across the transaction history as an equity account.
- * Scans every {@link ExchangedUTXO} (from-side) and {@link ExchangedUTXI} (to-side) for their
- * remaining availability. Matched exchange pairs at the same locked rate cancel to zero, so
- * only truly unresolved positions carry a balance.
+ * Tracks all open exchange positions scoped to this account as an equity account. Scans every
+ * {@link ExchangedUTXO} whose exchange's {@link Exchange.fromAccount} is this account (from-side)
+ * and every {@link ExchangedUTXI} whose {@link Exchange.toAccount} is this account (to-side) for
+ * their remaining availability. Matched exchange pairs at the same locked rate cancel to zero, so
+ * only truly unresolved positions carry a balance. An exchange's two sides may book to different
+ * accounts (see {@link ExchangeTarget}); each side counts only in the account that books it.
  *
  * Adding this as a child of the equity folder ensures `equity.getSignedBalancesScaled()` includes
  * open positions automatically — no adjustment is needed inside `ledger.verify()`.
  */
-export class ExchangeAccount extends ComputedAccount implements ExchangeAccountMarker {
+export class ExchangeAccount extends ComputedAccount {
     public getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint {
         let balance = 0n;
         for (const tx of transactions) {
             for (const output of tx.outputs)
                 if (output instanceof ExchangedUTXO && output.position === position
-                        && (output.exchange.account === undefined || output.exchange.account === this))
+                        && output.exchange.fromAccount === this)
                     balance += output.calculateAvailable(transactions);
             for (const input of tx.inputs)
                 if (input instanceof ExchangedUTXI && input.position === position
-                        && (input.exchange.account === undefined || input.exchange.account === this))
+                        && input.exchange.toAccount === this)
                     balance -= input.calculateAvailable(transactions);
         }
         return balance;
@@ -87,10 +88,10 @@ export class ExchangeAccount extends ComputedAccount implements ExchangeAccountM
         const positions = new Set<Position>();
         for (const tx of transactions) {
             for (const output of tx.outputs)
-                if (output instanceof ExchangedUTXO && (output.exchange.account === undefined || output.exchange.account === this))
+                if (output instanceof ExchangedUTXO && output.exchange.fromAccount === this)
                     positions.add(output.position);
             for (const input of tx.inputs)
-                if (input instanceof ExchangedUTXI && (input.exchange.account === undefined || input.exchange.account === this))
+                if (input instanceof ExchangedUTXI && input.exchange.toAccount === this)
                     positions.add(input.position);
         }
         const result = new Map<Position, bigint>();
