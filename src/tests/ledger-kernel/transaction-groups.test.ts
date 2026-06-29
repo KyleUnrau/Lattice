@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeFixture, openInto, commitSwap } from "../utils/ledger-fixture.js";
-import { Transaction, TransactionGroup } from "../../ledger-kernel/transactions.js";
+import { TransactionGroup } from "../../ledger-kernel/transactions/group.js";
+import { Transaction } from "../../ledger-kernel/transactions/transaction.js";
 import { ExchangeResolution } from "../../equity-policy/exchange.js";
 import { TerminalResolution } from "../../equity-policy/terminal.js";
 

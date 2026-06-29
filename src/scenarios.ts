@@ -6,7 +6,7 @@ import { TerminalAccount, type ExchangeAccount, type ResidualAccount } from "./l
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
-import { TransactionGroup } from "./ledger-kernel/transactions.js";
+import { TransactionGroup } from "./ledger-kernel/transactions/group.js";
 import type { Position } from "./ledger-kernel/positions.js";
 import type { UTXI } from "./ledger-kernel/transactions/inputs.js";
 import type { UTXO } from "./ledger-kernel/transactions/outputs.js";

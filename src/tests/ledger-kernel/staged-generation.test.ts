@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeFixture, openInto } from "../utils/ledger-fixture.js";
-import { Transaction } from "../../ledger-kernel/transactions.js";
+import { Transaction } from "../../ledger-kernel/transactions/transaction.js";
 import { GenerationContext } from "../../ledger-kernel/generation-context.js";
 import { UTXI, UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../../ledger-kernel/transactions/outputs.js";

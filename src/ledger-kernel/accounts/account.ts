@@ -3,7 +3,7 @@ import { AccountFolder } from "./folder.js";
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import type { Orientation } from "../ledger.js";
 import { type Position, unscale } from "../positions.js";
-import type { Transaction, TransactionLike } from "../transactions.js";
+import type { Transaction, TransactionLike } from "../transactions/transaction.js";
 import type { UTXI, Input } from "../transactions/inputs.js";
 import type { UTXO, Output } from "../transactions/outputs.js";
 import { getDisplayName, type AccountName, type AccountNode } from "./node.js";

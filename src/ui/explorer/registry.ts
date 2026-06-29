@@ -1,16 +1,16 @@
-import type { Transaction } from "../../ledger-kernel/transactions.js";
+import type { Transaction } from "../../ledger-kernel/transactions/transaction.js";
 import type { Input } from "../../ledger-kernel/transactions/inputs.js";
 import type { Output } from "../../ledger-kernel/transactions/outputs.js";
 import { Account } from "../../ledger-kernel/accounts/account.js";
 import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";
 import type { AccountNode } from "../../ledger-kernel/accounts/node.js";
-import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/special-edges/residual.js";
 import {
     Exchange,
     ExchangedUTXI,
     ExchangedUTXO
-} from "../../ledger-kernel/transactions/exchange.js";
-import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
+} from "../../ledger-kernel/transactions/special-edges/exchange.js";
+import { TerminalUTXO } from "../../ledger-kernel/transactions/special-edges/terminal.js";
 import type { LedgerView } from "../../scenarios.js";
 
 /** Any value-bearing lot or consumption record that can appear in a transaction's inputs/outputs. */

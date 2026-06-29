@@ -1,7 +1,8 @@
 import type { Account } from "./accounts/account.js";
 import type { Ledger } from "./ledger.js";
 import type { Position } from "./positions.js";
-import { Transaction, TransactionGroup, type TransactionLike } from "./transactions.js";
+import { TransactionGroup } from "./transactions/group.js";
+import { Transaction, type TransactionLike } from "./transactions/transaction.js";
 import type { Input } from "./transactions/inputs.js";
 import type { Output } from "./transactions/outputs.js";
 

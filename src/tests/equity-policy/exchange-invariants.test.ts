@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
-import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/special-edges/residual.js";
 import { assertPositionUnifiromity, type Position } from "../../ledger-kernel/positions.js";
 import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
 import { TerminalResolution } from "../../equity-policy/terminal.js";

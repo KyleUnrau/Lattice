@@ -1,6 +1,6 @@
 import { UTXO } from "../transactions/outputs.js";
 import { UTXI } from "../transactions/inputs.js";
-import type { TransactionLike } from "../transactions.js";
+import type { TransactionLike } from "../transactions/transaction.js";
 
 /**
  * Selects which lots to consume and in what amounts when `delta` units are requested.

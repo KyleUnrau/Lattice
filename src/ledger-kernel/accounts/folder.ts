@@ -2,7 +2,7 @@ import { ResidualAccount, ExchangeAccount, TerminalAccount } from "./computed.js
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import type { Orientation } from "../ledger.js";
 import { type Position, unscale } from "../positions.js";
-import type { Transaction } from "../transactions.js";
+import type { Transaction } from "../transactions/transaction.js";
 import type { UTXI } from "../transactions/inputs.js";
 import type { UTXO } from "../transactions/outputs.js";
 import { Account } from "./account.js";

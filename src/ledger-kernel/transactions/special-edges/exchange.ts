@@ -1,9 +1,10 @@
-import type { Recapture } from "../../equity-policy/recaptures.js";
-import type { ExchangeAccount } from "../accounts/computed.js";
-import type { Position } from "../positions.js";
-import type { Transaction } from "../transactions.js";
-import { UTXI } from "./inputs.js";
-import { UTXO } from "./outputs.js";
+import type { Recapture } from "../../../equity-policy/recaptures.js";
+import type { ExchangeAccount } from "../../accounts/computed.js";
+import type { Position } from "../../positions.js";
+import type { Transaction } from "../transaction.js";
+import { UTXI } from "../inputs.js";
+import { UTXO } from "../outputs.js";
+
 
 /**
  * Where an {@link Exchange}'s open position is booked. Either a single {@link ExchangeAccount}
@@ -28,7 +29,6 @@ export type ExchangeTarget = ExchangeAccount | { from: ExchangeAccount; to: Exch
  * directly, so that prior exchange lineages are recaptured correctly and a forward exchange is only
  * created when actually needed.
  */
-
 export class Exchange {
     public readonly from: ExchangedUTXO;
     public readonly to: ExchangedUTXI;
@@ -70,7 +70,6 @@ export class Exchange {
     }
 }
 /** The from-side of an {@link Exchange} — value given away; placed in a transaction's outputs. */
-
 export class ExchangedUTXO extends UTXO {
     public type = "exchanged-utxo";
 
@@ -81,7 +80,6 @@ export class ExchangedUTXO extends UTXO {
     ) { super(quantity, position); }
 }
 /** The to-side of an {@link Exchange} — value received; placed in a transaction's inputs. */
-
 export class ExchangedUTXI extends UTXI {
     public type = "exchanged-utxi";
 

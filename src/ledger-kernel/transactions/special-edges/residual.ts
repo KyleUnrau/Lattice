@@ -1,6 +1,7 @@
-import type { ResidualAccount } from "../accounts/computed.js";
-import type { Position } from "../positions.js";
-import { UTXI } from "./inputs.js";
+import type { ResidualAccount } from "../../accounts/computed.js";
+import type { Position } from "../../positions.js";
+import { UTXI } from "../inputs.js";
+
 
 /**
  * A gain (surplus) relative to an exchange's locked rate, recognized in the surface position.

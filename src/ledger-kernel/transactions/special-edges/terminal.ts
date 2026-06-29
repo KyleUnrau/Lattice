@@ -1,6 +1,7 @@
-import type { Position } from "../positions.js";
-import type { TerminalAccount } from "../accounts/computed.js";
-import { UTXO } from "./outputs.js";
+import type { TerminalAccount } from "../../accounts/computed.js";
+import type { Position } from "../../positions.js";
+import { UTXO } from "../outputs.js";
+
 
 /**
  * A **terminal settlement record** — the final recognition of origin-basis value leaving the system:
@@ -15,6 +16,7 @@ import { UTXO } from "./outputs.js";
  *
  * The owning {@link account} is referenced back so balances can be attributed without scanning.
  */
+
 export class TerminalUTXO extends UTXO {
     public type = "terminal-utxo";
 

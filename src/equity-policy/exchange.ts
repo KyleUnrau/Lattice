@@ -1,9 +1,10 @@
 import type { BookValueEngine } from "./book-value/engine.js";
 import { assertPositionUnifiromity, type Position } from "../ledger-kernel/positions.js";
-import { splitInputs, sumNodeQuantityScaled, Transaction } from "../ledger-kernel/transactions.js";
-import { TransactionGroup } from "../ledger-kernel/transactions.js";
-import { ResidualUTXI } from "../ledger-kernel/transactions/residual.js";
-import { Exchange, type ExchangeTarget } from "../ledger-kernel/transactions/exchange.js";
+import { splitInputs, sumNodeQuantityScaled } from "../ledger-kernel/transactions/utils.js";
+import { Transaction } from "../ledger-kernel/transactions/transaction.js";
+import { TransactionGroup } from "../ledger-kernel/transactions/group.js";
+import { ResidualUTXI } from "../ledger-kernel/transactions/special-edges/residual.js";
+import { Exchange, type ExchangeTarget } from "../ledger-kernel/transactions/special-edges/exchange.js";
 import { type Input } from "../ledger-kernel/transactions/inputs.js";
 import { type Output } from "../ledger-kernel/transactions/outputs.js";
 import { classifyRecaptures, executeRecaptures, unwind, type Recapture } from "./recaptures.js";

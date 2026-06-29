@@ -1,7 +1,9 @@
 import type { TerminalAccount, ResidualAccount } from "../ledger-kernel/accounts/computed.js";
 import { type Position, assertPositionUnifiromity } from "../ledger-kernel/positions.js";
-import { Transaction, TransactionGroup, sumNodeQuantityScaled } from "../ledger-kernel/transactions.js";
-import type { ResidualUTXI } from "../ledger-kernel/transactions/residual.js";
+import { sumNodeQuantityScaled } from "../ledger-kernel/transactions/utils.js";
+import { TransactionGroup } from "../ledger-kernel/transactions/group.js";
+import { Transaction } from "../ledger-kernel/transactions/transaction.js";
+import type { ResidualUTXI } from "../ledger-kernel/transactions/special-edges/residual.js";
 import type { Input } from "../ledger-kernel/transactions/inputs.js";
 import type { Output } from "../ledger-kernel/transactions/outputs.js";
 import type { BookValueEngine } from "./book-value/engine.js";

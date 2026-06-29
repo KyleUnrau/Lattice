@@ -1,8 +1,8 @@
-import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
-import { ExchangedUTXI, type Exchange } from "../../ledger-kernel/transactions/exchange.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/special-edges/residual.js";
+import { ExchangedUTXI, type Exchange } from "../../ledger-kernel/transactions/special-edges/exchange.js";
 import { UTXI, UTXOConsumption, type Input } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXIConsumption, UTXO } from "../../ledger-kernel/transactions/outputs.js";
-import type { Transaction } from "../../ledger-kernel/transactions.js";
+import type { Transaction } from "../../ledger-kernel/transactions/transaction.js";
 import { assertPositionUnifiromity, type Position } from "../../ledger-kernel/positions.js";
 
 /** A node in the cost basis tree returned by {@link BookValueEngine.compute}. */

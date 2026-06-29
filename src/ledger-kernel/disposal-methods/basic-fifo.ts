@@ -1,6 +1,6 @@
 import { UTXO } from "../transactions/outputs.js";
 import { UTXI } from "../transactions/inputs.js";
-import type { TransactionLike } from "../transactions.js";
+import type { TransactionLike } from "../transactions/transaction.js";
 
 /**
  * First-in-first-out {@link DisposalMethod}. Consumes the oldest available lots first,

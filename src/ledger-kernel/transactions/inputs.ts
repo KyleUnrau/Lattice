@@ -1,5 +1,5 @@
 import type { Position } from "../positions.js";
-import type { TransactionLike } from "../transactions.js";
+import type { TransactionLike } from "./transaction.js";
 import { UTXIConsumption, type UTXO } from "./outputs.js";
 
 export type Input = UTXI | UTXOConsumption;

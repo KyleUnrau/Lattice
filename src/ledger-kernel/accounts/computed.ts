@@ -1,9 +1,9 @@
 import type { Orientation } from "../ledger.js";
 import type { Position } from "../positions.js";
-import type { Transaction } from "../transactions.js";
-import { ResidualUTXI } from "../transactions/residual.js";
-import { ExchangedUTXI, ExchangedUTXO } from "../transactions/exchange.js";
-import { TerminalUTXO } from "../transactions/terminal.js";
+import type { Transaction } from "../transactions/transaction.js";
+import { ResidualUTXI } from "../transactions/special-edges/residual.js";
+import { ExchangedUTXI, ExchangedUTXO } from "../transactions/special-edges/exchange.js";
+import { TerminalUTXO } from "../transactions/special-edges/terminal.js";
 import { unscale } from "../positions.js";
 import { getDisplayName, type AccountName, type AccountNode } from "./node.js";
 import type { AccountSummary } from "./summary.js";

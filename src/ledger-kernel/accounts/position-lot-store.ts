@@ -1,6 +1,6 @@
 import type { DisposalMethod } from "../disposal-methods/disposals.js";
 import { type Position, scale } from "../positions.js";
-import type { Transaction, TransactionLike } from "../transactions.js";
+import type { Transaction, TransactionLike } from "../transactions/transaction.js";
 import { UTXI, type Input, type UTXOConsumption } from "../transactions/inputs.js";
 import { UTXO, type Output, type UTXIConsumption } from "../transactions/outputs.js";
 

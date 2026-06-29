@@ -1,14 +1,14 @@
 import { type Position, formatQuantity, unscale } from "../../ledger-kernel/positions.js";
-import type { Transaction } from "../../ledger-kernel/transactions.js";
-import { TransactionGroup } from "../../ledger-kernel/transactions.js";
+import type { Transaction } from "../../ledger-kernel/transactions/transaction.js";
+import { TransactionGroup } from "../../ledger-kernel/transactions/group.js";
 import { UTXI, UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO, UTXIConsumption } from "../../ledger-kernel/transactions/outputs.js";
-import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/special-edges/residual.js";
 import {
     ExchangedUTXI,
     ExchangedUTXO
-} from "../../ledger-kernel/transactions/exchange.js";
-import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
+} from "../../ledger-kernel/transactions/special-edges/exchange.js";
+import { TerminalUTXO } from "../../ledger-kernel/transactions/special-edges/terminal.js";
 import { Account } from "../../ledger-kernel/accounts/account.js";
 import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";
 import { ResidualAccount, ExchangeAccount, TerminalAccount } from "../../ledger-kernel/accounts/computed.js";

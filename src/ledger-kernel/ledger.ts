@@ -1,6 +1,7 @@
 import type { Position } from "./positions.js";
 import type { Result } from "../utils.js";
-import { Transaction, TransactionGroup, type TransactionLike } from "./transactions.js";
+import { TransactionGroup } from "./transactions/group.js";
+import { Transaction, type TransactionLike } from "./transactions/transaction.js";
 import type { AccountFolder } from "./accounts/folder.js";
 import type { FolderSummary } from "./accounts/summary.js";
 import { EventBuilder, GenerationContext } from "./generation-context.js";

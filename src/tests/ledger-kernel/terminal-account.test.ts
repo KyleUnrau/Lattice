@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
+import { TerminalUTXO } from "../../ledger-kernel/transactions/special-edges/terminal.js";
 import { TerminalAccount } from "../../ledger-kernel/accounts/computed.js";
 import { Account } from "../../ledger-kernel/accounts/account.js";
 import { TerminalResolution } from "../../equity-policy/terminal.js";

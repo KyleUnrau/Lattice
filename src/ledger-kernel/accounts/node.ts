@@ -2,7 +2,7 @@ import type { AccountFolder } from "./folder.js";
 import type { NodeSummary } from "./summary.js";
 import type { Orientation } from "../ledger.js";
 import type { Position } from "../positions.js";
-import type { Transaction } from "../transactions.js";
+import type { Transaction } from "../transactions/transaction.js";
 
 
 /**
