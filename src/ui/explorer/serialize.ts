@@ -3,11 +3,11 @@ import type { Transaction } from "../../ledger-kernel/transactions.js";
 import { TransactionGroup } from "../../ledger-kernel/transactions.js";
 import { UTXI, UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO, UTXIConsumption } from "../../ledger-kernel/transactions/outputs.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
 import {
     ExchangedUTXI,
-    ExchangedUTXO,
-    ResidualUTXI,
-} from "../../ledger-kernel/transactions/cross-position.js";
+    ExchangedUTXO
+} from "../../ledger-kernel/transactions/exchange.js";
 import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
 import { Account } from "../../ledger-kernel/accounts/account.js";
 import { AccountFolder } from "../../ledger-kernel/accounts/folder.js";

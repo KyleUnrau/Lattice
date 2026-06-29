@@ -65,7 +65,7 @@ export function makeFixture(): Fixture {
     const rentExpense = expenses.addTerminalAccount("Rent Expense", Orientation.Positive);
 
     const netCapitalGains = netIncome.addFolder("Net Capital Gains (Losses)", Orientation.Positive);
-    const capitalGains = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive, "Capital Losses");
+    const capitalGains = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive);
     const capitalLosses = netCapitalGains.addTerminalAccount("Capital Loss", Orientation.Negative);
 
     const cadToUsd = equity.addExchangeAccount("Transfers CAD→USD", Orientation.Positive);

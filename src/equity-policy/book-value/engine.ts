@@ -1,6 +1,7 @@
-import { ExchangedUTXI, ResidualUTXI, type Exchange } from "../../ledger-kernel/transactions/cross-position.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
+import { ExchangedUTXI, type Exchange } from "../../ledger-kernel/transactions/exchange.js";
 import { UTXI, UTXOConsumption, type Input } from "../../ledger-kernel/transactions/inputs.js";
-import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
+import { UTXIConsumption, UTXO } from "../../ledger-kernel/transactions/outputs.js";
 import type { Transaction } from "../../ledger-kernel/transactions.js";
 import { assertPositionUnifiromity, type Position } from "../../ledger-kernel/positions.js";
 
@@ -101,9 +102,13 @@ export class BookValueEngine {
     }
 
     /**
-     * Finds the transaction that produced `utxo` and proportionally attributes `quantity`
-     * to each of its inputs by the fraction `quantity / totalOutputQty`, then recurses
-     * via {@link traceInput}. `visited` guards against cycles in the traversal path.
+     * Finds the transaction that produced `utxo` and attributes `quantity` to each of its inputs
+     * by the input's **forward weight** (see {@link forwardInputWeights}), then recurses via
+     * {@link traceInput}. `visited` guards against cycles in the traversal path.
+     *
+     * Forward weighting — rather than a flat `quantity / totalOutputQty` share — is what keeps a
+     * recapture-settlement output (a looped edge being closed) from diluting the basis of the
+     * genuinely-forward outputs it shares a transaction with. See {@link forwardInputWeights}.
      */
     private traceUTXOFrom(utxo: UTXO, quantity: bigint, visited: Set<UTXO>): BasisPath[] {
         if (quantity <= 0n) throw new Error(`quantity must be positive, got ${quantity}`);
@@ -117,15 +122,86 @@ export class BookValueEngine {
         const producingTx = this.findProducingTransaction(utxo);
         if (!producingTx) throw new Error(`UTXO has no producing transaction — ledger invariant violated`);
 
-        const totalOutputQty = producingTx.outputs.reduce((sum, out) => sum + out.quantity, 0n);
+        const forwardWeights = this.forwardInputWeights(producingTx, nextVisited);
+        const totalForwardWeight = [...forwardWeights.values()].reduce((sum, w) => sum + w, 0n);
 
         const result: BasisPath[] = [];
         for (const input of producingTx.inputs) {
-            const attributedQty = input.quantity * quantity / totalOutputQty;
+            const weight = forwardWeights.get(input) ?? 0n;
+            const attributedQty = weight * quantity / totalForwardWeight;
             if (attributedQty === 0n) continue;
             result.push(...this.traceInput(input, attributedQty, nextVisited));
         }
         return result;
+    }
+
+    /**
+     * Apportions a producing transaction's input quantities into the share that flows **forward**
+     * (carries basis to the transaction's value-bearing outputs) versus the share consumed by a
+     * **recapture settlement** (a {@link UTXIConsumption} that closes an exchange to-side).
+     *
+     * A loop-close consuming transaction has the shape `IN[looped lot, forward lot] OUT[settle(edge.to),
+     * forwardFromSide]`: the looped lot returns to *settle* its edge, and the forward lot funds the new
+     * forward from-side. A flat proportional attribution would smear the looped lot's already-recaptured
+     * lineage onto the forward from-side — a phantom edge that, when the from-side is later consumed at a
+     * loss and fully unwound, drives a second recapture of the already-settled edge (whose to-side has no
+     * availability left). Instead, each settlement's quantity is subtracted from the forward weight of the
+     * input(s) whose most-recent exchanged provenance is that settled edge, so the forward outputs are
+     * attributed only across genuinely-forward input value.
+     *
+     * The remaining weights sum to the transaction's forward-output total (by conservation: every input
+     * unit either settles an edge or moves forward), so {@link traceUTXOFrom} can divide by their sum.
+     */
+    private forwardInputWeights(producingTx: Transaction, visited: Set<UTXO>): Map<Input, bigint> {
+        const weights = new Map<Input, bigint>(producingTx.inputs.map(input => [input, input.quantity]));
+
+        for (const output of producingTx.outputs) {
+            if (!(output instanceof UTXIConsumption) || !(output.source instanceof ExchangedUTXI)) continue;
+            const settledEdge = output.source.exchange;
+            let remaining = output.quantity;
+            for (const input of producingTx.inputs) {
+                if (remaining === 0n) break;
+                const weight = weights.get(input)!;
+                if (weight === 0n) continue;
+                const looped = this.inputEdgeQuantity(input, weight, settledEdge, visited);
+                const claimed = looped < remaining ? looped : remaining;
+                weights.set(input, weight - claimed);
+                remaining -= claimed;
+            }
+        }
+
+        return weights;
+    }
+
+    /**
+     * How much of `quantity` units of `input` has its most-recent exchanged provenance through
+     * `exchange` — i.e. last passed through `exchange`'s to-side before reaching `input` (following
+     * plain cash holds transparently). Used by {@link forwardInputWeights} to match a recapture
+     * settlement to the looped input it closes.
+     */
+    private inputEdgeQuantity(input: Input, quantity: bigint, exchange: Exchange, visited: Set<UTXO>): bigint {
+        if (input instanceof UTXOConsumption) return this.utxoEdgeQuantity(input.source, quantity, exchange, visited);
+        if (input instanceof ExchangedUTXI) return input.exchange === exchange ? quantity : 0n;
+        return 0n; // plain origin UTXI or a residual: not this edge's forward provenance.
+    }
+
+    /** Recurses {@link inputEdgeQuantity} through the lot's producing transaction (cash holds are transparent). */
+    private utxoEdgeQuantity(utxo: UTXO, quantity: bigint, exchange: Exchange, visited: Set<UTXO>): bigint {
+        if (visited.has(utxo)) return 0n;
+        const nextVisited = new Set(visited);
+        nextVisited.add(utxo);
+
+        const producingTx = this.findProducingTransaction(utxo);
+        if (!producingTx) return 0n;
+
+        const totalOutputQty = producingTx.outputs.reduce((sum, out) => sum + out.quantity, 0n);
+        let total = 0n;
+        for (const input of producingTx.inputs) {
+            const attributed = input.quantity * quantity / totalOutputQty;
+            if (attributed === 0n) continue;
+            total += this.inputEdgeQuantity(input, attributed, exchange, nextVisited);
+        }
+        return total;
     }
 
     /**

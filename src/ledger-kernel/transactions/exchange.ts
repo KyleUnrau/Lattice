@@ -1,7 +1,7 @@
 import type { Recapture } from "../../equity-policy/recaptures.js";
+import type { ExchangeAccount } from "../accounts/computed.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import type { ExchangeAccount, ResidualAccount } from "../accounts/computed.js";
 import { UTXI } from "./inputs.js";
 import { UTXO } from "./outputs.js";
 
@@ -12,8 +12,8 @@ import { UTXO } from "./outputs.js";
  * Out" and "Transfers In" lines). Imported as a type only, so this carries no runtime dependency
  * on `accounts/computed.ts` (which depends on this module for its `instanceof` checks).
  */
-export type ExchangeTarget = ExchangeAccount | { from: ExchangeAccount; to: ExchangeAccount };
 
+export type ExchangeTarget = ExchangeAccount | { from: ExchangeAccount; to: ExchangeAccount; };
 /**
  * Links two single-position transactions through a locked conversion rate.
  * `.from` is an {@link ExchangedUTXO} placed in the source transaction's outputs (value given away);
@@ -28,6 +28,7 @@ export type ExchangeTarget = ExchangeAccount | { from: ExchangeAccount; to: Exch
  * directly, so that prior exchange lineages are recaptured correctly and a forward exchange is only
  * created when actually needed.
  */
+
 export class Exchange {
     public readonly from: ExchangedUTXO;
     public readonly to: ExchangedUTXI;
@@ -37,8 +38,8 @@ export class Exchange {
     public readonly toAccount: ExchangeAccount;
 
     constructor(
-        from: {quantity: bigint, position: Position},
-        to: {quantity: bigint, position: Position},
+        from: { quantity: bigint; position: Position; },
+        to: { quantity: bigint; position: Position; },
         target: ExchangeTarget
     ) {
         this.from = new ExchangedUTXO(from.quantity, from.position, this);
@@ -68,8 +69,8 @@ export class Exchange {
         };
     }
 }
-
 /** The from-side of an {@link Exchange} — value given away; placed in a transaction's outputs. */
+
 export class ExchangedUTXO extends UTXO {
     public type = "exchanged-utxo";
 
@@ -79,8 +80,8 @@ export class ExchangedUTXO extends UTXO {
         public readonly exchange: Exchange
     ) { super(quantity, position); }
 }
-
 /** The to-side of an {@link Exchange} — value received; placed in a transaction's inputs. */
+
 export class ExchangedUTXI extends UTXI {
     public type = "exchanged-utxi";
 
@@ -88,27 +89,5 @@ export class ExchangedUTXI extends UTXI {
         quantity: bigint,
         position: Position,
         public readonly exchange: Exchange
-    ) { super(quantity, position); }
-}
-
-/**
- * A gain (surplus) relative to an exchange's locked rate, recognized in the surface position.
- * Placed in a transaction's inputs. The owning {@link ResidualAccount} that minted this lot is
- * referenced by {@link account}, so a later settlement can re-recognize the deferred equity within
- * the same account it originated in rather than an arbitrary one.
- *
- * `originBasis` records the origin-position composition (e.g. `{BTC: 0.0005}`) that this residual's
- * surface amount traces back to — the deferred equity it carries until settlement. The basis engine
- * surfaces this directly as a {@link ResidualPath} so consumers can settle the residual into its
- * origin positions.
- */
-export class ResidualUTXI extends UTXI {
-    public type = "residual-utxi";
-
-    constructor(
-        quantity: bigint,
-        position: Position,
-        public readonly originBasis: Map<Position, bigint>,
-        public readonly account: ResidualAccount
     ) { super(quantity, position); }
 }

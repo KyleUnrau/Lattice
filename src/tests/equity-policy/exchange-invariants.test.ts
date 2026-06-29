@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO } from "../../ledger-kernel/transactions/outputs.js";
-import { ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
 import { assertPositionUnifiromity, type Position } from "../../ledger-kernel/positions.js";
 import { collectOriginLeaves } from "../../equity-policy/book-value/lineage.js";
 import { TerminalResolution } from "../../equity-policy/terminal.js";
@@ -581,4 +581,49 @@ test("INV7b: a nested carry-back threads its EXACT enclosing-edge from-side, so 
     const hops = back.resolution.getRecaptureHops();
     assert.ok(hops.some(h => h.position === f.cad), "the nested residual closes at the CAD surface hop");
     assertHopsBalance(hops);
+});
+
+// ---------------------------------------------------------------------------
+// 8. A forward exchange minted in the same (loop-closing) transaction as a recapture
+//    settlement must trace to its TRUE funder, not the edge being closed.
+// ---------------------------------------------------------------------------
+
+test("INV8: a forward from-side minted alongside a recapture settlement traces to its own origin, so a later loop loss unwinds it without re-recapturing the already-settled edge", () => {
+    const f = makeFixture();
+
+    // EX0: CAD→USD. The 250 USD it mints is CAD-derived.
+    openInto(f, f.cash, f.cad, 500);
+    commitSwap(f, f.cash, f.cad, 500, f.cash, f.usd, 250, f.cadToUsd);
+
+    // A SECOND, independent USD origin sits alongside the CAD-derived USD.
+    openInto(f, f.cash, f.usd, 250);
+
+    // Send all 500 USD back to CAD. This single consuming transaction has the loop-close shape:
+    //   IN[250 USD (CAD-derived, closes EX0), 250 USD (origin)]  OUT[settle(EX0.to), EX2.from]
+    // The 250 USD origin funds the forward EX2 (USD→CAD); the CAD-derived 250 USD settles EX0.
+    const mint = commitSwap(f, f.cash, f.usd, 500, f.cash, f.cad, 900, f.usdToCad);
+    const forward = mint.resolution.exchange;
+    assert.notEqual(forward, null, "a forward USD→CAD edge is opened for the origin-USD portion");
+
+    // ROOT-CAUSE INVARIANT: the forward from-side's basis is PURE origin USD — the value that
+    // actually funded it — not a phantom blend through the EX0 edge that the same transaction closed.
+    // (Before the settlement-aware attribution fix this read 125 USD via EX0 + 125 USD origin, because
+    // the recapture-settlement output diluted the forward output's proportional share.)
+    const forwardOrigin = collectOriginLeaves(f.engine.traceLot(forward!.from));
+    assert.deepEqual([...forwardOrigin.keys()], [f.usd], "forward from-side is purely USD-origin");
+    assert.equal(forwardOrigin.get(f.usd), 25000n, "all 250 USD of it");
+    assert.equal(forwardOrigin.has(f.cad), false, "no phantom CAD lineage through the closed EX0 edge");
+
+    // Now close the EX2-derived CAD back to USD at a LOSS. The lost slice of the recovered basis is the
+    // forward from-side (EX2.from); unwinding it must reach origin USD directly. With the phantom CAD
+    // lineage it instead tried to re-recapture EX0 — whose USD to-side was already fully settled — and
+    // threw "Attempted to consume … from a UTXI that only has 0 remaining."
+    const closing = commitSwap(f, f.cash, f.cad, 900, f.cash, f.usd, 400, f.cadToUsd);
+
+    assert.ok(f.ledger.verify().ok, "ledger verifies after the loop loss unwinds the forward from-side");
+    assert.notEqual(closing.resolution.terminalLoss, null, "the loop closes at a loss");
+
+    // KEY INVARIANT: the loop loss lands at the forward from-side's true USD origin — 50 USD of
+    // unrecovered basis (250 USD recovered, only 200 USD of proceeds back it) — never in CAD.
+    assert.equal(f.capitalLosses.getSignedBalanceScaled(f.usd, f.ledger.transactions), 5000n, "50 USD loss recognized at the USD origin");
 });

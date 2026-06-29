@@ -1,10 +1,11 @@
 import type { Orientation } from "../ledger.js";
 import type { Position } from "../positions.js";
 import type { Transaction } from "../transactions.js";
-import { ExchangedUTXI, ExchangedUTXO, ResidualUTXI } from "../transactions/cross-position.js";
+import { ResidualUTXI } from "../transactions/residual.js";
+import { ExchangedUTXI, ExchangedUTXO } from "../transactions/exchange.js";
 import { TerminalUTXO } from "../transactions/terminal.js";
 import { unscale } from "../positions.js";
-import type { AccountNode } from "./node.js";
+import { getDisplayName, type AccountName, type AccountNode } from "./node.js";
 import type { AccountSummary } from "./summary.js";
 import type { AccountFolder } from "./folder.js";
 
@@ -19,7 +20,7 @@ export abstract class ComputedAccount implements AccountNode {
     public parent: AccountFolder | null = null;
 
     constructor(
-        public name: string,
+        public name: AccountName,
         public localOrientation: Orientation
     ) {}
 
@@ -53,7 +54,12 @@ export abstract class ComputedAccount implements AccountNode {
     }
 
     public summarize(position: Position, transactions: Transaction[]): AccountSummary {
-        return { name: this.name, balance: this.getBalance(position, transactions) };
+        const balance: number = this.getBalance(position, transactions);
+        return {
+            name: getDisplayName(this.name, balance),
+            orientation: {local: this.localOrientation, effective: this.getEffectiveOrientation()},
+            balance
+        };
     }
 }
 
@@ -117,21 +123,6 @@ export class ExchangeAccount extends ComputedAccount {
  */
 export class ResidualAccount extends ComputedAccount {
     private readonly utxis: ResidualUTXI[] = [];
-
-    /**
-     * @param negativeLabel - When provided, `summarize()` returns this name instead of `name`
-     *   whenever the balance in the queried position is negative. Enables a single account to
-     *   display as e.g. "Capital Gains" when net-positive and "Capital Losses" when net-negative.
-     */
-    constructor(name: string, localOrientation: Orientation, public readonly negativeLabel?: string) {
-        super(name, localOrientation);
-    }
-
-    public override summarize(position: Position, transactions: Transaction[]): AccountSummary {
-        const balance = this.getBalance(position, transactions);
-        const name = this.negativeLabel !== undefined && balance < 0 ? this.negativeLabel : this.name;
-        return { name, balance };
-    }
 
     public addResidualInput(quantity: bigint, position: Position, originBasis: Map<Position, bigint>): ResidualUTXI {
         const utxi = new ResidualUTXI(quantity, position, originBasis, this);

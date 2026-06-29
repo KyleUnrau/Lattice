@@ -1,6 +1,6 @@
 import { type Position } from "../ledger-kernel/positions.js";
 import type { Transaction } from "../ledger-kernel/transactions.js";
-import type { Exchange } from "../ledger-kernel/transactions/cross-position.js";
+import type { Exchange } from "../ledger-kernel/transactions/exchange.js";
 import type { Input, UTXOConsumption } from "../ledger-kernel/transactions/inputs.js";
 import type { Output, UTXIConsumption } from "../ledger-kernel/transactions/outputs.js";
 import { collectChainEdges, groupRecapturesByExchange, collectResidualNodes, collectCarryBacks } from "./book-value/lineage.js";

@@ -6,7 +6,7 @@ import type { Transaction } from "../transactions.js";
 import type { UTXI } from "../transactions/inputs.js";
 import type { UTXO } from "../transactions/outputs.js";
 import { Account } from "./account.js";
-import type { AccountNode } from "./node.js";
+import { getDisplayName, type AccountName, type AccountNode } from "./node.js";
 import type { FolderSummary, NodeSummary } from "./summary.js";
 
 
@@ -18,7 +18,7 @@ import type { FolderSummary, NodeSummary } from "./summary.js";
 
 export class AccountFolder implements AccountNode {
     constructor(
-        public name: string,
+        public name: AccountName,
         public localOrientation: Orientation,
         public children: AccountNode[] = [],
         public parent: AccountFolder | null = null
@@ -41,7 +41,7 @@ export class AccountFolder implements AccountNode {
     }
 
     public addAccount(
-        name: string,
+        name: AccountName,
         localOrientation: Orientation,
         utxoDisposalMethod: DisposalMethod<UTXO>,
         utxiDisposalMethod: DisposalMethod<UTXI>
@@ -51,25 +51,25 @@ export class AccountFolder implements AccountNode {
         return child;
     }
 
-    public addResidualAccount(name: string, localOrientation: Orientation, negativeLabel?: string): ResidualAccount {
-        const child = new ResidualAccount(name, localOrientation, negativeLabel);
+    public addResidualAccount(name: AccountName, localOrientation: Orientation): ResidualAccount {
+        const child = new ResidualAccount(name, localOrientation);
         this.addChild(child);
         return child;
     }
 
-    public addExchangeAccount(name: string, localOrientation: Orientation): ExchangeAccount {
+    public addExchangeAccount(name: AccountName, localOrientation: Orientation): ExchangeAccount {
         const child = new ExchangeAccount(name, localOrientation);
         this.addChild(child);
         return child;
     }
 
-    public addTerminalAccount(name: string, localOrientation: Orientation): TerminalAccount {
+    public addTerminalAccount(name: AccountName, localOrientation: Orientation): TerminalAccount {
         const child = new TerminalAccount(name, localOrientation);
         this.addChild(child);
         return child;
     }
 
-    public addFolder(name: string, localOrientation: Orientation): AccountFolder {
+    public addFolder(name: AccountName, localOrientation: Orientation): AccountFolder {
         const folder = new AccountFolder(name, localOrientation);
         this.addChild(folder);
         return folder;
@@ -128,6 +128,12 @@ export class AccountFolder implements AccountNode {
 
     public summarize(position: Position, transactions: Transaction[]): FolderSummary {
         const children: NodeSummary[] = this.children.map(child => child.summarize(position, transactions));
-        return { name: this.name, balance: this.getBalance(position, transactions), children };
+        const balance: number = this.getBalance(position, transactions);
+        return {
+            name: getDisplayName(this.name, balance),
+            orientation: {local: this.localOrientation, effective: this.getEffectiveOrientation()},
+            balance,
+            children
+        };
     }
 }

@@ -4,12 +4,12 @@ import { type Position, formatQuantity } from "../../ledger-kernel/positions.js"
 import type { Transaction } from "../../ledger-kernel/transactions.js";
 import { UTXI, UTXOConsumption, type Input } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXIConsumption, UTXO, type Output } from "../../ledger-kernel/transactions/outputs.js";
+import { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
 import {
     Exchange,
     ExchangedUTXI,
-    ExchangedUTXO,
-    ResidualUTXI,
-} from "../../ledger-kernel/transactions/cross-position.js";
+    ExchangedUTXO
+} from "../../ledger-kernel/transactions/exchange.js";
 import { TerminalUTXO } from "../../ledger-kernel/transactions/terminal.js";
 
 /**

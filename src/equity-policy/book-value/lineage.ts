@@ -1,6 +1,7 @@
 import type { BasisPath, ExchangePath, ResidualPath } from "./engine.js";
 import type { Position } from "../../ledger-kernel/positions.js";
-import type { Exchange, ResidualUTXI } from "../../ledger-kernel/transactions/cross-position.js";
+import type { ResidualUTXI } from "../../ledger-kernel/transactions/residual.js";
+import type { Exchange } from "../../ledger-kernel/transactions/exchange.js";
 
 /**
  * A single exchange edge selected for recapture, with the to-side amount being recaptured

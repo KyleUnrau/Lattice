@@ -7,7 +7,7 @@ import { Transaction } from "./ledger-kernel/transactions.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { Account } from "./ledger-kernel/accounts/account.js";
-import { Exchange } from "./ledger-kernel/transactions/cross-position.js";
+import { Exchange } from "./ledger-kernel/transactions/exchange.js";
 import { BookValueEngine } from "./equity-policy/book-value/engine.js";
 import { unwind } from "./equity-policy/recaptures.js";
 import { ScenarioLedger } from "./scenarios.js";

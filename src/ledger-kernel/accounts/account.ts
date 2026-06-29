@@ -6,7 +6,7 @@ import { type Position, unscale } from "../positions.js";
 import type { Transaction, TransactionLike } from "../transactions.js";
 import type { UTXI, Input } from "../transactions/inputs.js";
 import type { UTXO, Output } from "../transactions/outputs.js";
-import type { AccountNode } from "./node.js";
+import { getDisplayName, type AccountName, type AccountNode } from "./node.js";
 import type { AccountSummary } from "./summary.js";
 
 
@@ -22,7 +22,7 @@ export class Account implements AccountNode {
     public readonly lotStores: Map<Position, PositionLotStore> = new Map();
 
     constructor(
-        public name: string,
+        public name: AccountName,
         public localOrientation: Orientation,
         public parent: AccountFolder | null,
         public readonly utxoDisposalMethod: DisposalMethod<UTXO>,
@@ -79,6 +79,11 @@ export class Account implements AccountNode {
     }
 
     public summarize(position: Position, transactions: Transaction[]): AccountSummary {
-        return { name: this.name, balance: this.getBalance(position, transactions) };
+        const balance: number = this.getBalance(position, transactions);
+        return {
+            name: getDisplayName(this.name, balance),
+            orientation: {local: this.localOrientation, effective: this.getEffectiveOrientation()},
+            balance
+        };
     }
 }

@@ -38,32 +38,7 @@ export namespace ScenarioLedger {
         c: { name: "Position C (Inventory)", decimals: 0 }
     }
 
-    interface Accounts {
-        netAssets: AccountFolder;
-        equity: AccountFolder;
-
-        assets: AccountFolder;
-        cash: Account;
-        inventory: Account;
-
-        openingBalance: Account;
-        capitalGains: ResidualAccount;
-        capitalLosses: TerminalAccount;
-        netTransfers: ExchangeAccount;
-
-        netIncome: AccountFolder;
-        revenues: AccountFolder;
-        inventoryProfit: ResidualAccount;
-
-        expenses: AccountFolder;
-        salesTax: TerminalAccount;
-        exchangeExpense: TerminalAccount;
-        rentExpense: TerminalAccount;
-        inventoryLoss: TerminalAccount;
-        spoilageExpense: TerminalAccount;
-    }
-
-    function generateAccounts(): Accounts {
+    function generateAccounts() {
         const netAssets = new AccountFolder("Net Assets", Orientation.Positive);
         const equity = new AccountFolder("Net Worth", Orientation.Negative);
 
@@ -71,13 +46,29 @@ export namespace ScenarioLedger {
         const cash = assets.addAccount("Cash", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
         const inventory = assets.addAccount("Inventory", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 
-        const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
-        const netCapitalGains = equity.addFolder("Net Capital Gains", Orientation.Positive);
-        const capitalGains = netCapitalGains.addResidualAccount("Capital Gains", Orientation.Positive);
-        const capitalLosses = netCapitalGains.addTerminalAccount("Capital Loss", Orientation.Positive);
+        const liabilities = netAssets.addFolder("Liabilities", Orientation.Negative);
+        const accountsPayable = liabilities.addAccount("Accounts Payable", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
 
-        const netTransfersFolder = equity.addFolder("Net Transfers", Orientation.Positive);
-        const netTransfers = netTransfersFolder.addExchangeAccount("A -> B", Orientation.Positive);
+        const openingBalance = equity.addAccount("Opening Balance", Orientation.Positive, fifo<UTXO>, fifo<UTXI>);
+        const netCapitalGains = equity.addFolder({positive: "Net Capital Gains", negative: "Net Capital Loss"}, Orientation.Positive);
+        
+        const capitalGains = netCapitalGains.addFolder("Capital Gains", Orientation.Positive);
+        const gainsFromA = capitalGains.addResidualAccount("Capital Gains from Disposition of A", Orientation.Positive);
+        const gainsFromB = capitalGains.addResidualAccount("Capital Gains from Disposition of B", Orientation.Positive)
+
+        const capitalLosses = netCapitalGains.addFolder("Capital Loss", Orientation.Negative);
+        const lossesFromA = capitalLosses.addTerminalAccount("Capital Loss from Disposition of A", Orientation.Positive);
+        const lossesFromB = capitalLosses.addTerminalAccount("Capital Loss from Disposition of B", Orientation.Positive);
+
+        const netTransfers = equity.addFolder("Net Transfers", Orientation.Positive);
+
+        const transfersFrom = netTransfers.addFolder("Transfers From", Orientation.Positive);
+        const fromA = transfersFrom.addExchangeAccount("Transfers from A", Orientation.Positive);
+        const fromB = transfersFrom.addExchangeAccount("Transfers from B", Orientation.Positive);
+
+        const transfersTo = netTransfers.addFolder("Transfers To", Orientation.Negative);
+        const toA = transfersTo.addExchangeAccount("Transfers to A", Orientation.Positive);
+        const toB = transfersTo.addExchangeAccount("Transfers to B", Orientation.Positive);
 
         const netIncome = equity.addFolder("Net Income", Orientation.Positive);
         const revenues = netIncome.addFolder("Revenues", Orientation.Positive);
@@ -93,16 +84,42 @@ export namespace ScenarioLedger {
         return {
             netAssets,
             equity,
+
             assets,
             cash,
             inventory,
+
+            liabilities,
+            accountsPayable,
+
             openingBalance,
+            netCapitalGains,
+
             capitalGains,
+            gainsFromA,
+            gainsFromB,
+
             capitalLosses,
+            lossesFromA,
+            lossesFromB,
+
+            residualA: {gain: gainsFromA, loss: lossesFromA},
+            residualB: {gain: gainsFromB, loss: lossesFromB},
+
             netTransfers,
+
+            transfersFrom,
+            fromA,
+            fromB,
+
+            transfersTo,
+            toA,
+            toB,
+
             netIncome,
             revenues,
             inventoryProfit,
+
             expenses,
             salesTax,
             exchangeExpense,
@@ -118,6 +135,100 @@ export namespace ScenarioLedger {
     export const engine = new BookValueEngine(ledger.transactions);
 
     export const events: Record<string, () => any> = {
+        event0: () => {
+            const event = ledger.beginEvent();
+            event.context.generateInputs(accounts.openingBalance, positions.a, 1000);
+            event.context.generateOutputs(accounts.cash, positions.a, 1000);
+            event.newTransaction(event.context);
+            return event.register();
+        },
+        event1: () => {
+            const event = ledger.beginEvent();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 500);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 250);
+            const exchange = new ExchangeResolution(
+                fromInputs,
+                toOutputs,
+                event.view(),
+                engine,
+                accounts.residualA,
+                {from: accounts.toB, to: accounts.fromA}
+            );
+
+            event.newGroup(exchange.constructTransactions().toGroup());
+            return event.register();
+        },
+        event2: () => {
+            const event = ledger.beginEvent();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.b, 250);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.a, 550);
+            const exchange = new ExchangeResolution(
+                fromInputs,
+                toOutputs,
+                event.view(),
+                engine,
+                accounts.residualB,
+                {from: accounts.toA, to: accounts.fromB}
+            );
+
+            event.newGroup(exchange.constructTransactions().toGroup());
+            return event.register();
+        },
+        event3: () => {
+            const event = ledger.beginEvent();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 500);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 250);
+            const exchange = new ExchangeResolution(
+                fromInputs,
+                toOutputs,
+                event.view(),
+                engine,
+                accounts.residualA,
+                {from: accounts.toB, to: accounts.fromA}
+            );
+
+            event.newGroup(exchange.constructTransactions().toGroup());
+            return event.register();
+        },
+        event4: () => {
+            const event = ledger.beginEvent();
+            event.context.generateInputs(accounts.accountsPayable, positions.b, 250);
+            event.context.generateOutputs(accounts.cash, positions.b, 250);
+            event.newTransaction(event.context);
+            return event.register();
+        },
+        event5: () => {
+            const event = ledger.beginEvent();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.b, 500);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.a, 900);
+            const exchange = new ExchangeResolution(
+                fromInputs,
+                toOutputs,
+                event.view(),
+                engine,
+                accounts.residualB,
+                {from: accounts.toA, to: accounts.fromB}
+            );
+
+            event.newGroup(exchange.constructTransactions().toGroup());
+            return event.register();
+        },
+        event6: () => {
+            const event = ledger.beginEvent();
+            const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 1450);
+            const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 725);
+            const exchange = new ExchangeResolution(
+                fromInputs,
+                toOutputs,
+                event.view(),
+                engine,
+                accounts.residualA,
+                {from: accounts.toB, to: accounts.fromA}
+            );
+
+            event.newGroup(exchange.constructTransactions().toGroup());
+            return event.register();
+        }
     }
 
     export function buildSampleLedger(): LedgerView {

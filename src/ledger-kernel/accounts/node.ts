@@ -18,8 +18,19 @@ import type { Transaction } from "../transactions.js";
  *   `position.decimals`).
  */
 
+export type AccountName = string | {positive: string, negative: string, zero?: string};
+
+export function getDisplayName(name: AccountName, balance: number): string {
+    if (typeof name === "string") return name;
+
+    if (balance < 0) return name.negative;
+    if (balance && name.zero) return name.zero;
+
+    return name.positive;
+}
+
 export interface AccountNode {
-    name: string;
+    name: string | {positive: string, negative: string};
     parent: AccountFolder | null;
     getEffectiveOrientation(): Orientation;
     getSignedBalanceScaled(position: Position, transactions: Transaction[]): bigint;
