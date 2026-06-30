@@ -1,5 +1,5 @@
 import { type Position, formatQuantity, unscale } from "../../ledger-kernel/positions.js";
-import type { Transaction } from "../../ledger-kernel/transactions/transaction.js";
+import { Transaction } from "../../ledger-kernel/transactions/transaction.js";
 import { TransactionGroup } from "../../ledger-kernel/transactions/group.js";
 import { UTXI, UTXOConsumption } from "../../ledger-kernel/transactions/inputs.js";
 import { UTXO, UTXIConsumption } from "../../ledger-kernel/transactions/outputs.js";
@@ -181,7 +181,7 @@ function serializeGroup(group: TransactionGroup, txIndex: Map<Transaction, numbe
         members: group.members.map((member): Dict =>
             member instanceof TransactionGroup
                 ? { group: serializeGroup(member, txIndex) }
-                : { txIndex: txIndex.get(member) ?? null }),
+                : { txIndex: member instanceof Transaction ? txIndex.get(member) ?? null : null }),
     };
 }
 

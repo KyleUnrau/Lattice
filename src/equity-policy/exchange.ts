@@ -2,7 +2,8 @@ import type { BookValueEngine } from "./book-value/engine.js";
 import { assertPositionUnifiromity, type Position } from "../ledger-kernel/positions.js";
 import { splitInputs, sumNodeQuantityScaled } from "../ledger-kernel/transactions/utils.js";
 import { Transaction } from "../ledger-kernel/transactions/transaction.js";
-import { TransactionGroup } from "../ledger-kernel/transactions/group.js";
+import { TransactionGroup, OrderedTransactionGroup } from "../ledger-kernel/transactions/group.js";
+import type { TransactionMaterial, TransactionMaterialFactory } from "../ledger-kernel/transactions/material.js";
 import { ResidualUTXI } from "../ledger-kernel/transactions/special-edges/residual.js";
 import { Exchange, type ExchangeTarget } from "../ledger-kernel/transactions/special-edges/exchange.js";
 import { type Input } from "../ledger-kernel/transactions/inputs.js";
@@ -11,7 +12,7 @@ import { classifyRecaptures, executeRecaptures, unwind, type Recapture } from ".
 import { gainAccountOf, lossAccountOf, type ResidualTarget } from "../ledger-kernel/accounts/computed.js";
 import { type HopTransaction } from "./recaptures.js";
 import { collectOriginLeaves, forwardSurfaceQuantity, type ResidualCarryBack } from "./book-value/lineage.js";
-import { TerminalResolution } from "./terminal.js";
+import { TerminalResolution, TerminalTransactions } from "./terminal.js";
 
 interface ResidualSettlement {
     /** Surface-position settlements closing the legs of *directly-held* carried-back residuals (consuming/from transaction). */
@@ -65,28 +66,32 @@ export type ExchangeRecaptureResolution = {
     surfaceRemainderSettlement: Output | null;
 };
 
-export class ExchangeTransactions {
+export class ExchangeTransactions extends TransactionGroup {
+    public readonly kind = "exchange";
+
     constructor(
         public readonly from: Transaction,
         public readonly to: Transaction,
         public readonly intermediates: TransactionGroup,
-        public readonly terminalLoss: TransactionGroup,
+        /** Undefined when the exchange produced no loss; never an empty-group sentinel. */
+        public readonly terminalLoss: TerminalTransactions | undefined,
         public readonly resolution: ExchangeResolution
-    ) {}
-
-    /**
-     * The role-annotated {@link TransactionGroup} for this exchange. Member order matches
-     * {@link flatten} exactly, so committing the group reproduces the same history.
-     */
-    public toGroup(): TransactionGroup {
-        const members: (Transaction | TransactionGroup)[] = [this.from, this.to];
-        if (this.intermediates.members.length !== 0) members.push(this.intermediates);
-        if (this.terminalLoss.members.length !== 0) members.push(this.terminalLoss);
-        return new TransactionGroup(members);
+    ) {
+        super();
+        // Commit order: from → to → intermediates → terminalLoss.
+        // This is an existing ledger-history convention verified by tests. The intermediate hops do not
+        // depend on `to` being committed first (both consume pre-existing lots from committed history),
+        // but the ordering must not be changed silently — tests explicitly assert it.
+        const result: TransactionMaterial[] = [this.from, this.to];
+        if (!this.intermediates.isEmpty) result.push(this.intermediates);
+        if (this.terminalLoss) result.push(this.terminalLoss);
+        this._members = result;
     }
 
-    public flatten(): Transaction[] {
-        return this.toGroup().flatten();
+    private readonly _members: readonly TransactionMaterial[];
+
+    public get members(): readonly TransactionMaterial[] {
+        return this._members;
     }
 }
 
@@ -117,7 +122,7 @@ export type { ExchangeTarget };
  * loss on the reclaims (rather than the surface) keeps any carry-back/forward surface intact even
  * when a single consumed lot blends loop capital with residual-derived value.
  */
-export class ExchangeResolution {
+export class ExchangeResolution implements TransactionMaterialFactory<ExchangeTransactions> {
     /** Forward exchange at the actual proceeds rate; null when all consumed value looped or was residual-derived. */
     public readonly exchange: Exchange | null;
     /** Gain residuals (`ResidualUTXI`) recognized in the target on the recovered loop; losses are terminal (see {@link terminalLoss}). */
@@ -545,12 +550,12 @@ export class ExchangeResolution {
     }
 
     public constructIntermediateTransactions(): TransactionGroup {
-        return new TransactionGroup(this.getRecaptureHops().map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions)));
+        return new OrderedTransactionGroup(this.getRecaptureHops().map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions)));
     }
 
-    /** The terminal-loss settlement transactions (lost surface expensed to origin), or an empty group when the exchange did not lose. */
-    public constructTerminalLossTransactions(): TransactionGroup {
-        return this.terminalLoss ? this.terminalLoss.constructTransactions().toGroup() : new TransactionGroup([]);
+    /** The terminal-loss settlement transactions (lost surface expensed to origin), or undefined when the exchange did not lose. */
+    public constructTerminalLossTransactions(): TerminalTransactions | undefined {
+        return this.terminalLoss?.constructTransactions();
     }
 
     public constructTransactions(additionalNodes?: {inputs: Input[], outputs: Output[]}): ExchangeTransactions {

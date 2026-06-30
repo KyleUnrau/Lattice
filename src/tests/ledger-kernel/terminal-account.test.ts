@@ -32,7 +32,7 @@ test("TERM3: an expensed terminal record is committed and counts toward balance,
     const inputs = f.cash.generateInputs(f.cad, 200, f.ledger.transactions);
     const resolution = new TerminalResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
     const event = f.ledger.beginEvent();
-    event.record(resolution.constructTransactions().toGroup());
+    event.record(resolution.constructTransactions());
     event.register();
 
     assert.ok(f.ledger.verify().ok, "ledger verifies after expensing into a terminal account");

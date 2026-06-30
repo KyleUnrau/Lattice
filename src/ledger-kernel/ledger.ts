@@ -39,7 +39,7 @@ export class Ledger {
     /** Registers an already-committed group as a top-level event. Used by {@link record} and {@link EventBuilder}. */
     public appendGroup(group: TransactionGroup): TransactionGroup {
         this.groups.push(group);
-        this.transactions.push(...group.flatten());
+        for (const tx of group.flatten()) this.transactions.push(tx);
         return group;
     }
 

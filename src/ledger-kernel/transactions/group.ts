@@ -1,34 +1,68 @@
 import type { Transaction } from "./transaction.js";
-
+import type { TransactionMaterial } from "./material.js";
 
 /**
- * A read-only, recursive **overlay** that records which committed {@link Transaction}s form one
- * business event, and what role each plays. A single economic action — an exchange, an expense,
- * or a composite "split this draw into an expense and an exchange" — typically lands as several
- * atomic, single-position transactions; the kernel's flat history erases the link between them.
- * A `TransactionGroup` re-annotates that link *without altering the history*.
+ * The semantic base abstraction for a structured bundle of {@link Transaction}s. Every accounting
+ * operation that spans more than one atomic transaction — an exchange, a terminal expense, a
+ * composite event — is a `TransactionGroup` subclass that preserves its named roles while still
+ * producing a deterministic flat list for the ledger.
  *
  * **It is not authoritative.** The flat `Ledger.transactions` array remains the single source of
  * truth for lot availability, cost-basis lineage, and `Ledger.verify()`. A group only holds
- * references — by identity — to transactions already in that array, so it can never change
- * availability, lineage, or commit order. Removing every group would leave the ledger's mechanics
- * untouched.
+ * references — by identity — to already-committed transactions, so removing every group leaves
+ * the ledger's mechanics untouched.
  *
- * Build one from a resolution's transactions via `toGroup(...)`, or compose several with
- * `Ledger.beginEvent(...)`; commit one with `Ledger.record(...)`.
+ * Concrete subclasses:
+ * - {@link OrderedTransactionGroup} — generic, anonymous sequential bundle
+ * - `ExchangeTransactions` — semantic exchange bundle with named `from`, `to`, `intermediates`,
+ *   `terminalLoss`, `resolution` fields
+ * - `TerminalTransactions` — semantic terminal-expense bundle with named `from`, `intermediates`,
+ *   `externalTerminals`, `resolution` fields
  */
-
-export class TransactionGroup {
-    constructor(
-        public readonly members: (Transaction | TransactionGroup)[]
-    ) { }
+export abstract class TransactionGroup implements TransactionMaterial {
+    /** Discriminant for runtime inspection of what kind of accounting operation this group represents. */
+    public abstract readonly kind: string;
 
     /**
-     * The group's leaf {@link Transaction}s in depth-first order — exactly the sequence committed
-     * to the ledger. This is the single source of truth for member ordering: a resolution wrapper's
-     * own `flatten()` delegates here so the two can never drift.
+     * The immediate children of this group, each of which is either a leaf {@link Transaction} or
+     * a nested {@link TransactionGroup}. Implementations filter out empty children so that callers
+     * see only meaningful members (e.g. `ExchangeTransactions` omits its `intermediates` when the
+     * exchange requires no intermediate hops).
      */
-    public flatten(): Transaction[] {
-        return this.members.flatMap(member => member instanceof TransactionGroup ? member.flatten() : [member]);
+    public abstract get members(): readonly TransactionMaterial[];
+
+    /**
+     * All leaf {@link Transaction}s in depth-first order — exactly the sequence committed to the
+     * ledger. Derived from {@link members} so that member ordering is the single source of truth;
+     * subclasses that override `members` get the correct `flatten()` for free.
+     */
+    public flatten(): readonly Transaction[] {
+        return this._flat ??= this.members.flatMap(member => member.flatten());
+    }
+    private _flat?: readonly Transaction[];
+
+    /** True when this group contributes no leaf transactions (e.g. an empty hop list). */
+    public get isEmpty(): boolean {
+        return this.members.length === 0;
+    }
+}
+
+/**
+ * A generic, ordered bundle of {@link TransactionMaterial}. Used for composite events that group
+ * several semantic sub-flows (e.g. an expense followed by an exchange) and for internal sequential
+ * groups such as intermediate hop lists. Unlike the named semantic subclasses, an
+ * `OrderedTransactionGroup` carries no domain meaning beyond "these items happen in this order".
+ */
+export class OrderedTransactionGroup extends TransactionGroup {
+    public readonly kind = "ordered";
+
+    constructor(
+        private readonly _members: readonly TransactionMaterial[]
+    ) {
+        super();
+    }
+
+    public get members(): readonly TransactionMaterial[] {
+        return this._members;
     }
 }

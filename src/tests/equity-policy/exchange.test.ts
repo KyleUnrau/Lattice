@@ -91,7 +91,7 @@ test("a partial exchange resolves only its portion; the rest is an independent t
                                        f.engine, { gain: f.capitalGains, loss: f.capitalLosses }, f.cadToUsd);
 
     const event = f.ledger.beginEvent();
-    event.record(res.constructTransactions().toGroup());
+    event.record(res.constructTransactions());
 
     // The forward exchange links ONLY the exchanged 400 CAD ↔ 300 USD.
     assert.notEqual(res.exchange, null);

@@ -115,7 +115,7 @@ export function commitSwap(
     );
 
     const event = f.ledger.beginEvent();
-    event.record(resolution.constructTransactions().toGroup());
+    event.record(resolution.constructTransactions());
     event.register();
 
     return { resolution, intermediates: resolution.getRecaptureHops() };

@@ -2,6 +2,7 @@ import type { Result } from "../../utils.js";
 import type { Position } from "../positions.js";
 import { type Input, UTXI, UTXOConsumption } from "./inputs.js";
 import { type Output, UTXO, UTXIConsumption } from "./outputs.js";
+import type { TransactionMaterial } from "./material.js";
 
 
 /**
@@ -22,11 +23,13 @@ export interface TransactionLike {
  * and `sum(inputs) === sum(outputs)`. Throws immediately if either is violated.
  */
 
-export class Transaction implements TransactionLike {
+export class Transaction implements TransactionLike, TransactionMaterial {
     public position: Position;
 
     public inputs: Input[];
     public outputs: Output[];
+
+    public flatten(): readonly Transaction[] { return [this]; }
 
     constructor(
         inputs: Input[],

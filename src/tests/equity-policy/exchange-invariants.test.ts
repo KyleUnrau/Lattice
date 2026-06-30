@@ -438,7 +438,7 @@ test("INV5f: expensing forward-exchanged value terminalizes only the forward edg
         const inputs = f.cash.generateInputs(f.cad, 50, f.ledger.transactions);
         const res = new TerminalResolution(inputs, f.ledger.transactions, f.engine, f.exchangeExpense);
         const ev = f.ledger.beginEvent();
-        ev.record(res.constructTransactions().toGroup());
+        ev.record(res.constructTransactions());
         ev.register();
     }
 
@@ -472,7 +472,7 @@ test("INV5f: expensing forward-exchanged value terminalizes only the forward edg
         );
 
     const ev = f.ledger.beginEvent();
-    ev.record(built!.toGroup());
+    ev.record(built!);
     ev.register();
 
     assert.ok(f.ledger.verify().ok, "ledger verifies after event4");

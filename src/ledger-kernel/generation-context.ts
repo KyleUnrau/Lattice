@@ -1,8 +1,9 @@
 import type { Account } from "./accounts/account.js";
 import type { Ledger } from "./ledger.js";
 import type { Position } from "./positions.js";
-import { TransactionGroup } from "./transactions/group.js";
+import { TransactionGroup, OrderedTransactionGroup } from "./transactions/group.js";
 import { Transaction, type TransactionLike } from "./transactions/transaction.js";
+import { type TransactionMaterial, type TransactionMaterialFactory, isTransactionMaterial } from "./transactions/material.js";
 import type { Input } from "./transactions/inputs.js";
 import type { Output } from "./transactions/outputs.js";
 
@@ -58,14 +59,15 @@ export class GenerationContext implements TransactionLike {
 
 /**
  * Accumulates several sub-flows into one composite {@link TransactionGroup}. Each {@link record}
- * commits its sub-flow's leaves to the ledger immediately — so a subsequent resolution constructed
- * against `ledger.transactions` sees them as already spent — while nesting the sub-flow under the
- * event being built. {@link register} registers the composite as a single top-level event. Obtain one
- * via {@link Ledger.beginEvent}.
+ * makes its sub-flow's transactions visible in {@link view} immediately — so a subsequent
+ * resolution constructed against `event.view()` sees them as already spent — while nesting the
+ * sub-flow under the event being built. {@link register} registers the composite as a single
+ * top-level event. Obtain one via {@link Ledger.beginEvent}.
  */
 export class EventBuilder {
     public readonly context: GenerationContext;
-    public readonly members: (Transaction | TransactionGroup)[] = [];
+    public readonly members: TransactionMaterial[] = [];
+    private readonly _stagedFlat: Transaction[] = [];
 
     constructor(
         private readonly ledger: Ledger
@@ -73,32 +75,34 @@ export class EventBuilder {
         this.context = new GenerationContext(ledger.transactions);
     }
 
-    /** Commits `group`'s leaves now and nests it under the event as a sub-flow. */
-    public record(transaction: Transaction | TransactionGroup): void {
-        this.members.push(transaction);
+    /**
+     * Nests `input` under the event and makes its transactions visible to subsequent draws via
+     * {@link view}. Accepts any {@link TransactionMaterial} (a {@link Transaction}, any
+     * {@link TransactionGroup} subclass, etc.) or any {@link TransactionMaterialFactory} whose
+     * `constructTransactions()` will be called to obtain the material (e.g. a resolution object).
+     */
+    public record(input: TransactionMaterial | TransactionMaterialFactory): void {
+        const material = isTransactionMaterial(input) ? input : input.constructTransactions();
+        this.members.push(material);
+        this._stagedFlat.push(...material.flatten());
     }
 
+    /**
+     * Constructs a {@link Transaction} from `transactionLike`, records it, and returns it. The
+     * return value is useful when subsequent input generation needs to reference this transaction's
+     * outputs (e.g. to consume a freshly minted lot in a follow-on draw).
+     */
     public newTransaction(transactionLike: TransactionLike): Transaction {
-        const transaction: Transaction = (transactionLike instanceof Transaction) ? transactionLike : new Transaction(transactionLike.inputs, transactionLike.outputs, this.view());
+        const transaction: Transaction = (transactionLike instanceof Transaction)
+            ? transactionLike
+            : new Transaction(transactionLike.inputs, transactionLike.outputs, this.view());
         this.record(transaction);
         return transaction;
-    } 
-
-    public newGroup(...transactionLikes: (TransactionLike | TransactionGroup)[]): TransactionGroup {
-        const members: (Transaction | TransactionGroup)[] = [];
-        for (const transactionLike of transactionLikes) {
-            if (transactionLike instanceof Transaction || transactionLike instanceof TransactionGroup) members.push(transactionLike);
-            else members.push(new Transaction(transactionLike.inputs, transactionLike.outputs, this.view()));
-        }
-
-        const group = new TransactionGroup(members);
-        this.record(group);
-        return group;
     }
 
     public generateGroup(): TransactionGroup {
         if (this.members.length === 1 && this.members[0] instanceof TransactionGroup) return this.members[0];
-        return new TransactionGroup(this.members);
+        return new OrderedTransactionGroup(this.members);
     }
 
     /** Registers the accumulated sub-flows as one composite top-level event. */
@@ -106,7 +110,11 @@ export class EventBuilder {
         return this.ledger.appendGroup(this.generateGroup());
     }
 
+    /**
+     * The live ledger transactions plus all transactions already recorded in this event — the full
+     * availability surface for generating subsequent inputs or outputs within the same event.
+     */
     public view(): Transaction[] {
-        return [...this.ledger.transactions, ...this.members.flatMap((value) => ((value instanceof Transaction) ? value : value.flatten()))];
+        return [...this.ledger.transactions, ...this._stagedFlat];
     }
 }

@@ -1,8 +1,9 @@
 import type { TerminalAccount, ResidualAccount } from "../ledger-kernel/accounts/computed.js";
 import { type Position, assertPositionUnifiromity } from "../ledger-kernel/positions.js";
 import { sumNodeQuantityScaled } from "../ledger-kernel/transactions/utils.js";
-import { TransactionGroup } from "../ledger-kernel/transactions/group.js";
+import { TransactionGroup, OrderedTransactionGroup } from "../ledger-kernel/transactions/group.js";
 import { Transaction } from "../ledger-kernel/transactions/transaction.js";
+import type { TransactionMaterial, TransactionMaterialFactory } from "../ledger-kernel/transactions/material.js";
 import type { ResidualUTXI } from "../ledger-kernel/transactions/special-edges/residual.js";
 import type { Input } from "../ledger-kernel/transactions/inputs.js";
 import type { Output } from "../ledger-kernel/transactions/outputs.js";
@@ -25,27 +26,31 @@ export type TerminalRecapturedGroup = {
     totalQuantity: bigint;
 };
 
-export class TerminalTransactions {
+export class TerminalTransactions extends TransactionGroup {
+    public readonly kind = "terminal";
+
     constructor(
         public readonly from: Transaction,
         public readonly intermediates: TransactionGroup,
         public readonly externalTerminals: TransactionGroup,
         public readonly resolution: TerminalResolution
-    ) { }
-
-    /**
-     * The role-annotated {@link TransactionGroup} for this terminal event. Member order matches
-     * {@link flatten} exactly, so committing the group reproduces the same history.
-     */
-    public toGroup(): TransactionGroup {
-        const members: (Transaction | TransactionGroup)[] = [this.from];
-        if (this.intermediates.members.length !== 0) members.push(this.intermediates);
-        if (this.externalTerminals.members.length !== 0) members.push(this.externalTerminals);
-        return new TransactionGroup(members);
+    ) {
+        super();
+        // Commit order: consuming transaction first, then intermediate hops, then terminal recognitions.
+        const result: TransactionMaterial[] = [this.from];
+        if (!this.intermediates.isEmpty) result.push(this.intermediates);
+        if (!this.externalTerminals.isEmpty) result.push(this.externalTerminals);
+        this._members = result;
     }
 
-    public flatten(): Transaction[] {
-        return this.toGroup().flatten();
+    private readonly _members: readonly TransactionMaterial[];
+
+    /**
+     * Ordered members of this terminal bundle. Empty role-groups (no hops, no external
+     * recognitions) are omitted so callers see only the meaningful parts.
+     */
+    public get members(): readonly TransactionMaterial[] {
+        return this._members;
     }
 }
 /**
@@ -75,7 +80,7 @@ export class TerminalTransactions {
  * are available), then the terminal recognitions.
  */
 
-export class TerminalResolution {
+export class TerminalResolution implements TransactionMaterialFactory<TerminalTransactions> {
     /** One group per terminal-origin position recovered by the unwind; each drives one recognition transaction. */
     public readonly recaptureGroups: TerminalRecapturedGroup[];
     /** Surface-position portions with no exchange lineage; recognized directly in the consuming transaction. */
@@ -237,7 +242,7 @@ export class TerminalResolution {
      * edge's to-side (netting to zero). Commit these after the consuming transaction.
      */
     public constructIntermediateTransactions(): TransactionGroup {
-        return new TransactionGroup(this.hops.map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions)));
+        return new OrderedTransactionGroup(this.hops.map(hop => new Transaction(hop.inputs, hop.outputs, this.transactions)));
     }
 
     /**
@@ -246,7 +251,7 @@ export class TerminalResolution {
      * (recognized capital-gain lot → terminal output). Commit these last.
      */
     public constructTerminalTransactions(): TransactionGroup {
-        return new TransactionGroup(this.terminalEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions)));
+        return new OrderedTransactionGroup(this.terminalEntries.map(entry => new Transaction(entry.inputs, entry.outputs, this.transactions)));
     }
 
     public constructTransactions(additionalNodes?: { inputs: Input[]; outputs: Output[]; }): TerminalTransactions {

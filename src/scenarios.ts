@@ -2,7 +2,6 @@ import { BookValueEngine } from "./equity-policy/book-value/engine.js";
 import { ExchangeResolution } from "./equity-policy/exchange.js";
 import { TerminalResolution } from "./equity-policy/terminal.js";
 import type { Account } from "./ledger-kernel/accounts/account.js";
-import { TerminalAccount, type ExchangeAccount, type ResidualAccount } from "./ledger-kernel/accounts/computed.js";
 import { AccountFolder } from "./ledger-kernel/accounts/folder.js";
 import { fifo } from "./ledger-kernel/disposal-methods/basic-fifo.js";
 import { Ledger, Orientation } from "./ledger-kernel/ledger.js";
@@ -155,7 +154,7 @@ export namespace ScenarioLedger {
                 {from: accounts.toB, to: accounts.fromA}
             );
 
-            event.newGroup(exchange.constructTransactions().toGroup());
+            event.record(exchange.constructTransactions());
             return event.register();
         },
         event2: () => {
@@ -171,7 +170,7 @@ export namespace ScenarioLedger {
                 {from: accounts.toA, to: accounts.fromB}
             );
 
-            event.newGroup(exchange.constructTransactions().toGroup());
+            event.record(exchange.constructTransactions());
             return event.register();
         },
         event3: () => {
@@ -187,7 +186,7 @@ export namespace ScenarioLedger {
                 {from: accounts.toB, to: accounts.fromA}
             );
 
-            event.newGroup(exchange.constructTransactions().toGroup());
+            event.record(exchange.constructTransactions());
             return event.register();
         },
         event4: () => {
@@ -210,23 +209,21 @@ export namespace ScenarioLedger {
                 {from: accounts.toA, to: accounts.fromB}
             );
 
-            event.newGroup(exchange.constructTransactions().toGroup());
+            event.record(exchange.constructTransactions());
             return event.register();
         },
         event6: () => {
             const event = ledger.beginEvent();
-            const fromInputs = event.context.generateInputs(accounts.cash, positions.a, 1450);
-            const toOutputs = event.context.generateOutputs(accounts.cash, positions.b, 725);
             const exchange = new ExchangeResolution(
-                fromInputs,
-                toOutputs,
+                event.context.generateInputs(accounts.cash, positions.a, 1450),
+                event.context.generateOutputs(accounts.cash, positions.b, 725),
                 event.view(),
                 engine,
                 accounts.residualA,
                 {from: accounts.toB, to: accounts.fromA}
             );
 
-            event.newGroup(exchange.constructTransactions().toGroup());
+            event.record(exchange.constructTransactions());
             return event.register();
         }
     }
